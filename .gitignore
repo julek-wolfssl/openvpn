@@ -72,3 +72,7 @@ nbproject
 test-driver
 compile
 stamp-h2
+
+\.settings/
+\.project
+\.cproject
