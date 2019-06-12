@@ -1014,6 +1014,10 @@ elif test "${with_crypto_library}" = "mbedtls"; then
 	CRYPTO_CFLAGS="${MBEDTLS_CFLAGS}"
 	CRYPTO_LIBS="${MBEDTLS_LIBS}"
 elif test "${with_crypto_library}" = "wolfssl"; then
+	if test "${enable_plugins}" = "yes"; then
+		AC_MSG_ERROR([Compiling OpenVPN with plugins not supported. Use --disable-plugins to disable plugins])
+	fi
+
 	AC_ARG_VAR([WOLFSSL_CFLAGS], [C compiler flags for wolfssl])
 	AC_ARG_VAR([WOLFSSL_LIBS], [linker flags for wolfssl])
 	

@@ -31,9 +31,16 @@
 
 #include <wolfssl/openssl/evp.h>
 #include <wolfssl/openssl/hmac.h>
+#include <wolfssl/openssl/ssl.h>
+#include <wolfssl/openssl/objects.h>
+
+#ifndef __OPENVPN_X509_CERT_T_DECLARED
+#define __OPENVPN_X509_CERT_T_DECLARED
+typedef WOLFSSL_X509 openvpn_x509_cert_t;
+#endif
 
 /** Generic cipher key type %context. */
-typedef WOLFSSL_CIPHER cipher_kt_t;
+typedef WOLFSSL_EVP_CIPHER cipher_kt_t;
 
 /** Generic message digest key type %context. */
 typedef WOLFSSL_Hasher md_kt_t;
@@ -47,7 +54,27 @@ typedef WOLFSSL_EVP_MD_CTX md_ctx_t;
 /** Generic HMAC %context. */
 typedef WOLFSSL_HMAC_CTX hmac_ctx_t;
 
+/** Maximum length of an IV */
+#define OPENVPN_MAX_IV_LENGTH   16
+
+/** Cipher is in CBC mode */
+#define OPENVPN_MODE_CBC        EVP_CIPH_CBC_MODE
+
+/** Cipher is in OFB mode */
+#define OPENVPN_MODE_OFB        EVP_CIPH_OFB_MODE
+
+/** Cipher is in CFB mode */
+#define OPENVPN_MODE_CFB        EVP_CIPH_CFB_MODE
+
 #define DES_KEY_LENGTH 8
 #define MD4_DIGEST_LENGTH       16
+
+/** Cipher should encrypt */
+#define OPENVPN_OP_ENCRYPT      1
+
+/** Cipher should decrypt */
+#define OPENVPN_OP_DECRYPT      0
+
+#define CIPHER_LIST_SIZE 1000
 
 #endif /* CRYPTO_WOLFSSL_H_ */

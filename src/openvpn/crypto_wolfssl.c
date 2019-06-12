@@ -32,6 +32,8 @@
 #include "config-msvc.h"
 #endif
 
+#include "syshead.h"
+
 #if defined(ENABLE_CRYPTO_WOLFSSL)
 
 #include "basic.h"
@@ -54,19 +56,54 @@ void crypto_uninit_lib(void) {
     }
 }
 
-void crypto_clear_error(void);
+void crypto_clear_error(void) {}
 
-void crypto_init_lib_engine(const char *engine_name);
+void crypto_init_lib_engine(const char *engine_name) {
+    msg(M_WARN, "Note: wolfSSL does not have an engine");
+}
 
-const char *translate_cipher_name_from_openvpn(const char *cipher_name);
+void show_available_ciphers(void) {
+    int nid;
+    size_t i;
 
-const char *translate_cipher_name_from_openvpn(const char *cipher_name);
+    /* If we ever exceed this, we must be more selective */
+    const cipher_kt_t *cipher_list[CIPHER_LIST_SIZE];
+    size_t num_ciphers = 0;
 
-void show_available_ciphers(void);
+    for (nid = 0; nid < CIPHER_LIST_SIZE; ++nid) {
+        const cipher_kt_t *cipher = wolfSSL_EVP_get_cipherbynid(nid);
+        if (cipher) {
+            cipher_list[num_ciphers++] = cipher;
+        }
+        if (num_ciphers == CIPHER_LIST_SIZE) {
+            msg(M_WARN, "WARNING: Too many ciphers, not showing all");
+            break;
+        }
+    }
 
-void show_available_digests(void);
+    for (i = 0; i < num_ciphers; i++) {
+		print_cipher(cipher_list[i]);
+    }
 
-void show_available_engines(void);
+    printf("\n");
+}
+
+void show_available_digests(void) {
+    int nid;
+
+    for (nid = 0; nid < 10000; ++nid) {
+        const WOLFSSL_EVP_MD *digest = wolfSSL_EVP_get_digestbynid(nid);
+        if (digest) {
+            printf("%s %d bit digest size\n",
+            		wolfSSL_OBJ_nid2sn(nid), wolfSSL_EVP_MD_size(digest) * 8);
+        }
+    }
+    printf("\n");
+}
+
+void show_available_engines(void) {
+    msg(M_WARN, "Note: wolfSSL does not have an engine");
+}
 
 bool crypto_pem_encode(const char *name, struct buffer *dst,
                        const struct buffer *src, struct gc_arena *gc);
@@ -74,7 +111,13 @@ bool crypto_pem_encode(const char *name, struct buffer *dst,
 bool crypto_pem_decode(const char *name, struct buffer *dst,
                        const struct buffer *src);
 
-int rand_bytes(uint8_t *output, int len);
+int rand_bytes(uint8_t *output, int len) {
+    if (unlikely(WOLFSSL_SUCCESS != wolfSSL_RAND_bytes(output, len))) {
+    	msg(M_WARN, "wolfSSL_RAND_bytes() failed");
+        return 0;
+    }
+    return 1;
+}
 
 int key_des_num_cblocks(const cipher_kt_t *kt);
 
@@ -86,15 +129,25 @@ void cipher_des_encrypt_ecb(const unsigned char key[DES_KEY_LENGTH],
                             unsigned char src[DES_KEY_LENGTH],
                             unsigned char dst[DES_KEY_LENGTH]);
 
-const cipher_kt_t *cipher_kt_get(const char *ciphername);
+const cipher_kt_t *cipher_kt_get(const char *ciphername) {
+	return wolfSSL_EVP_get_cipherbyname(ciphername);
+}
 
-const char *cipher_kt_name(const cipher_kt_t *cipher_kt);
+const char *cipher_kt_name(const cipher_kt_t *cipher_kt) {
+	return wolfSSL_CIPHER_get_name(cipher_kt);
+}
 
-int cipher_kt_key_size(const cipher_kt_t *cipher_kt);
+int cipher_kt_key_size(const cipher_kt_t *cipher_kt) {
+	return wolfSSL_EVP_Cipher_key_length(cipher_kt);
+}
 
-int cipher_kt_iv_size(const cipher_kt_t *cipher_kt);
+int cipher_kt_iv_size(const cipher_kt_t *cipher_kt) {
+	return wolfSSL_EVP_CIPHER_iv_length(cipher_kt);
+}
 
-int cipher_kt_block_size(const cipher_kt_t *cipher_kt);
+int cipher_kt_block_size(const cipher_kt_t *cipher_kt) {
+	return wolfSSL_EVP_CIPHER_block_size(cipher_kt);
+}
 
 int cipher_kt_tag_size(const cipher_kt_t *cipher_kt);
 
