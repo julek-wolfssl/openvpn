@@ -79,8 +79,8 @@ struct options_pre_pull
 };
 
 #endif
-#if !defined(ENABLE_CRYPTO_OPENSSL) && !defined(ENABLE_CRYPTO_MBEDTLS)
-#error "At least one of OpenSSL or mbed TLS needs to be defined."
+#if !defined(ENABLE_CRYPTO_OPENSSL) && !defined(ENABLE_CRYPTO_MBEDTLS) && !defined(ENABLE_CRYPTO_WOLFSSL)
+#error "At least one of OpenSSL or mbed TLS or wolfSSL needs to be defined."
 #endif
 
 struct connection_entry

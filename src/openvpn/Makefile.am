@@ -50,6 +50,7 @@ openvpn_SOURCES = \
 	crypto.c crypto.h crypto_backend.h \
 	crypto_openssl.c crypto_openssl.h \
 	crypto_mbedtls.c crypto_mbedtls.h \
+	crypto_wolfssl.c crypto_wolfssl.h \
 	dhcp.c dhcp.h \
 	env_set.c env_set.h \
 	errlevel.h \

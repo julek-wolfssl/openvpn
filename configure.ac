@@ -1027,7 +1027,13 @@ elif test "${with_crypto_library}" = "wolfssl"; then
 			[wolfssl],
 			[wc_InitRsaKey],
 			[],
-			[AC_MSG_ERROR([Could not find mbed TLS.])]
+			[AC_MSG_ERROR([Could not link wolfSSL library.])]
+		)
+		AC_CHECK_LIB(
+			[wolfssl],
+			[wolfSSL_EVP_CipherInit_ex],
+			[],
+			[AC_MSG_ERROR([OpenSSL compatibility layer missing in wolfSSL. This can be fixed by configuring wolfSSL with ./configure --enable-opensslextra])]
 		)
 	fi
 	
