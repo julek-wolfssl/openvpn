@@ -59,7 +59,7 @@ void crypto_uninit_lib(void) {
 void crypto_clear_error(void) {}
 
 void crypto_init_lib_engine(const char *engine_name) {
-    msg(M_WARN, "Note: wolfSSL does not have an engine");
+    msg(M_INFO, "Note: wolfSSL does not have an engine");
 }
 
 void show_available_ciphers(void) {
@@ -76,7 +76,7 @@ void show_available_ciphers(void) {
             cipher_list[num_ciphers++] = cipher;
         }
         if (num_ciphers == CIPHER_LIST_SIZE) {
-            msg(M_WARN, "WARNING: Too many ciphers, not showing all");
+            msg(M_INFO, "WARNING: Too many ciphers, not showing all");
             break;
         }
     }
@@ -102,7 +102,7 @@ void show_available_digests(void) {
 }
 
 void show_available_engines(void) {
-    msg(M_WARN, "Note: wolfSSL does not have an engine");
+    msg(M_INFO, "Note: wolfSSL does not have an engine");
 }
 
 bool crypto_pem_encode(const char *name, struct buffer *dst,
@@ -113,7 +113,7 @@ bool crypto_pem_decode(const char *name, struct buffer *dst,
 
 int rand_bytes(uint8_t *output, int len) {
     if (unlikely(WOLFSSL_SUCCESS != wolfSSL_RAND_bytes(output, len))) {
-    	msg(M_WARN, "wolfSSL_RAND_bytes() failed");
+    	msg(D_CRYPT_ERRORS, "wolfSSL_RAND_bytes() failed");
         return 0;
     }
     return 1;
@@ -121,12 +121,12 @@ int rand_bytes(uint8_t *output, int len) {
 
 int key_des_num_cblocks(const cipher_kt_t *kt) {
     int ret = 0;
-    if (kt && !strncmp(kt))
+    if (kt && !strncmp(kt, "DES-", 4))
     {
 		ret = wolfSSL_EVP_Cipher_key_length(kt) / sizeof(WOLFSSL_DES_cblock);
 
     }
-    msg(M_DEBUG, "CRYPTO INFO: n_DES_cblocks=%d", ret);
+    msg(D_CRYPTO_DEBUG, "CRYPTO INFO: n_DES_cblocks=%d", ret);
     return ret;
 }
 
@@ -182,17 +182,17 @@ bool key_des_check(uint8_t *key, int key_len, int ndc) {
     	WOLFSSL_DES_cblock *dc = (WOLFSSL_DES_cblock *) buf_read_alloc(&b, sizeof(WOLFSSL_DES_cblock));
         if (!dc)
         {
-        	msg(M_FATAL, "CRYPTO INFO: check_key_DES: insufficient key material");
+        	msg(D_CRYPT_ERRORS, "CRYPTO INFO: check_key_DES: insufficient key material");
             goto err;
         }
         if (wolfSSL_DES_is_weak_key(dc))
         {
-        	msg(M_FATAL, "CRYPTO INFO: check_key_DES: weak key detected");
+        	msg(D_CRYPT_ERRORS, "CRYPTO INFO: check_key_DES: weak key detected");
             goto err;
         }
         if (!DES_check_key_parity(dc))
         {
-        	msg(M_FATAL, "CRYPTO INFO: check_key_DES: bad parity detected");
+        	msg(D_CRYPT_ERRORS, "CRYPTO INFO: check_key_DES: bad parity detected");
             goto err;
         }
     }
@@ -203,18 +203,39 @@ err:
     return false;
 }
 
-void key_des_fixup(uint8_t *key, int key_len, int ndc);
+void key_des_fixup(uint8_t *key, int key_len, int ndc) {
+    int i;
+    struct buffer b;
+
+    buf_set_read(&b, key, key_len);
+    for (i = 0; i < ndc; ++i)
+    {
+    	WOLFSSL_DES_cblock *dc = (WOLFSSL_DES_cblock *) buf_read_alloc(&b, sizeof(WOLFSSL_DES_cblock));
+        if (!dc)
+        {
+            msg(D_CRYPT_ERRORS, "CRYPTO INFO: fixup_key_DES: insufficient key material");
+            wolfSSL_ERR_clear_error();
+            return;
+        }
+        wolfSSL_DES_set_odd_parity(dc);
+    }
+}
 
 void cipher_des_encrypt_ecb(const unsigned char key[DES_KEY_LENGTH],
                             unsigned char src[DES_KEY_LENGTH],
-                            unsigned char dst[DES_KEY_LENGTH]);
+                            unsigned char dst[DES_KEY_LENGTH]) {
+	WOLFSSL_DES_key_schedule sched;
+
+	wolfSSL_DES_set_key_unchecked((WOLFSSL_DES_cblock *)key, &sched);
+	wolfSSL_DES_ecb_encrypt((WOLFSSL_DES_cblock *)src, (WOLFSSL_DES_cblock *)dst, &sched, DES_ENCRYPT);
+}
 
 const cipher_kt_t *cipher_kt_get(const char *ciphername) {
 	return wolfSSL_EVP_get_cipherbyname(ciphername);
 }
 
 const char *cipher_kt_name(const cipher_kt_t *cipher_kt) {
-	return wolfSSL_CIPHER_get_name(cipher_kt);
+	return cipher_kt;
 }
 
 int cipher_kt_key_size(const cipher_kt_t *cipher_kt) {

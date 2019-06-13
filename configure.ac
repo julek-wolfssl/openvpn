@@ -1037,7 +1037,7 @@ elif test "${with_crypto_library}" = "wolfssl"; then
 			[wolfssl],
 			[wolfSSL_EVP_CipherInit_ex],
 			[],
-			[AC_MSG_ERROR([OpenSSL compatibility layer missing in wolfSSL. This can be fixed by configuring wolfSSL with ./configure --enable-opensslextra])]
+			[AC_MSG_ERROR([OpenSSL compatibility layer missing in wolfSSL. This can be fixed by configuring wolfSSL with ./configure --enable-opensslall])]
 		)
 	fi
 	

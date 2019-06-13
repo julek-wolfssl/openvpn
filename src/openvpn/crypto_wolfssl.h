@@ -29,11 +29,14 @@
 #ifndef CRYPTO_WOLFSSL_H_
 #define CRYPTO_WOLFSSL_H_
 
+#define OPENSSL_ALL
+
 #include <wolfssl/openssl/evp.h>
 #include <wolfssl/openssl/hmac.h>
 #include <wolfssl/openssl/ssl.h>
 #include <wolfssl/openssl/objects.h>
 #include <wolfssl/openssl/des.h>
+#include <wolfssl/ssl.h>
 #include <stdbool.h>
 
 #ifndef __OPENVPN_X509_CERT_T_DECLARED
