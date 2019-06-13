@@ -1802,6 +1802,15 @@ print_cipher(const cipher_kt_t *cipher)
     printf(")\n");
 }
 
+const cipher_name_pair cipher_name_translation_table[] = {
+    { "AES-128-GCM", "id-aes128-GCM" },
+    { "AES-192-GCM", "id-aes192-GCM" },
+    { "AES-256-GCM", "id-aes256-GCM" },
+    { "CHACHA20-POLY1305", "ChaCha20-Poly1305" },
+};
+const size_t cipher_name_translation_table_count =
+    sizeof(cipher_name_translation_table) / sizeof(*cipher_name_translation_table);
+
 static const cipher_name_pair *
 get_cipher_name_pair(const char *cipher_name)
 {

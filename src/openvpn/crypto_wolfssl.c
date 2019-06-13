@@ -106,10 +106,82 @@ void show_available_engines(void) {
 }
 
 bool crypto_pem_encode(const char *name, struct buffer *dst,
-                       const struct buffer *src, struct gc_arena *gc);
+                       const struct buffer *src, struct gc_arena *gc) {
+    bool ret = false;
+    WOLFSSL_BIO *bio = wolfSSL_BIO_new(BIO_s_mem());
+    if (!bio || !wolfSSL_PEM_write_bio(bio, name, "", BPTR(src), BLEN(src)))
+    {
+        ret = false;
+        goto cleanup;
+    }
+
+    WOLFSSL_BUF_MEM *bptr;
+    wolfSSL_BIO_get_mem_ptr(bio, &bptr);
+
+    *dst = alloc_buf_gc(bptr->length + 1, gc);
+    ASSERT(buf_write(dst, bptr->data, bptr->length));
+    buf_null_terminate(dst);
+
+    ret = true;
+cleanup:
+    if (!wolfSSL_BIO_free(bio))
+    {
+        ret = false;
+    }
+
+    return ret;
+}
 
 bool crypto_pem_decode(const char *name, struct buffer *dst,
-                       const struct buffer *src);
+                       const struct buffer *src) {
+    bool ret = false;
+
+    WOLFSSL_BIO *bio = wolfSSL_BIO_new_mem_buf((char *)BPTR(src), BLEN(src));
+    if (!bio)
+    {
+        msg(M_FATAL, "Cannot open memory BIO for PEM decode");
+    }
+
+    char *name_read = NULL;
+    char *header_read = NULL;
+    uint8_t *data_read = NULL;
+    long data_read_len = 0;
+    if (!wolfSSL_PEM_read_bio(bio, &name_read, &header_read, &data_read,
+                      	  	  &data_read_len))
+    {
+        msg(D_CRYPT_ERRORS, "%s: PEM decode failed", __func__);
+        goto cleanup;
+    }
+
+    if (strcmp(name, name_read))
+    {
+        msg(D_CRYPT_ERRORS,
+		    "%s: unexpected PEM name (got '%s', expected '%s')",
+            __func__, name_read, name);
+        goto cleanup;
+    }
+
+    uint8_t *dst_data = buf_write_alloc(dst, data_read_len);
+    if (!dst_data)
+    {
+        msg(D_CRYPT_ERRORS, "%s: dst too small (%i, needs %li)", __func__,
+            BCAP(dst), data_read_len);
+        goto cleanup;
+    }
+    memcpy(dst_data, data_read, data_read_len);
+
+    ret = true;
+cleanup:
+	wolfSSL_OPENSSL_free(name_read);
+	wolfSSL_OPENSSL_free(header_read);
+	wolfSSL_OPENSSL_free(data_read);
+    if (!wolfSSL_BIO_free(bio))
+    {
+        ret = false;
+    }
+
+    return ret;
+}
 
 int rand_bytes(uint8_t *output, int len) {
     if (unlikely(WOLFSSL_SUCCESS != wolfSSL_RAND_bytes(output, len))) {
@@ -347,6 +419,31 @@ int cipher_ctx_mode(const cipher_ctx_t *ctx) {
 const cipher_kt_t *cipher_ctx_get_cipher_kt(const cipher_ctx_t *ctx) {
     const struct cipher *ent;
 
+
+    static const struct cipher{
+            unsigned char type;
+            const char *name;
+    } cipher_tbl[] = {
+        {AES_128_CBC_TYPE, "AES-128-CBC"},
+        {AES_192_CBC_TYPE, "AES-192-CBC"},
+        {AES_256_CBC_TYPE, "AES-256-CBC"},
+    	{AES_128_CTR_TYPE, "AES-128-CTR"},
+    	{AES_192_CTR_TYPE, "AES-192-CTR"},
+    	{AES_256_CTR_TYPE, "AES-256-CTR"},
+    	{AES_128_ECB_TYPE, "AES-128-ECB"},
+    	{AES_192_ECB_TYPE, "AES-192-ECB"},
+    	{AES_256_ECB_TYPE, "AES-256-ECB"},
+        {DES_CBC_TYPE, "DES-CBC"},
+        {DES_ECB_TYPE, "DES-ECB"},
+        {DES_EDE3_CBC_TYPE, "DES-EDE3-CBC"},
+        {DES_EDE3_ECB_TYPE, "DES-EDE3-ECB"},
+        {ARC4_TYPE, "ARC4"},
+    #ifdef HAVE_IDEA
+        {IDEA_CBC_TYPE, "IDEA-CBC"},
+    #endif
+        { 0, NULL}
+    };
+
 	if (ctx == NULL)
 		return NULL;
 
@@ -358,59 +455,208 @@ const cipher_kt_t *cipher_ctx_get_cipher_kt(const cipher_ctx_t *ctx) {
 	return NULL;
 }
 
-int cipher_ctx_reset(cipher_ctx_t *ctx, const uint8_t *iv_buf);
+int cipher_ctx_reset(cipher_ctx_t *ctx, const uint8_t *iv_buf) {
+    return wolfSSL_EVP_CipherInit_ex(ctx, NULL, NULL, NULL, iv_buf, -1);
+}
 
-int cipher_ctx_update_ad(cipher_ctx_t *ctx, const uint8_t *src, int src_len);
+int cipher_ctx_update_ad(cipher_ctx_t *ctx, const uint8_t *src, int src_len) {
+#ifdef HAVE_AEAD_CIPHER_MODES
+	msg(M_FATAL, "wolfSSL does not support AEAD ciphers in OpenSSL compatibility layer");
+#else
+    ASSERT(0);
+#endif
+    return 0;
+}
 
 int cipher_ctx_update(cipher_ctx_t *ctx, uint8_t *dst, int *dst_len,
-                      uint8_t *src, int src_len);
+                      uint8_t *src, int src_len) {
+    if (!wolfSSL_EVP_CipherUpdate(ctx, dst, dst_len, src, src_len)) {
+        msg(M_FATAL, "%s: wolfSSL_EVP_CipherUpdate() failed", __func__);
+    }
+    return 1;
+}
 
-int cipher_ctx_final(cipher_ctx_t *ctx, uint8_t *dst, int *dst_len);
+int cipher_ctx_final(cipher_ctx_t *ctx, uint8_t *dst, int *dst_len) {
+    return wolfSSL_EVP_CipherFinal(ctx, dst, dst_len);
+}
 
 int cipher_ctx_final_check_tag(cipher_ctx_t *ctx, uint8_t *dst, int *dst_len,
-                               uint8_t *tag, size_t tag_len);
+                               uint8_t *tag, size_t tag_len) {
+#ifdef HAVE_AEAD_CIPHER_MODES
+	msg(M_FATAL, "wolfSSL does not support AEAD ciphers in OpenSSL compatibility layer");
+#else
+    ASSERT(0);
+#endif
+    return 0;
+}
 
-const md_kt_t *md_kt_get(const char *digest);
+const md_kt_t *md_kt_get(const char *digest) {
+    const WOLFSSL_EVP_MD *md = NULL;
+    ASSERT(digest);
+    md = wolfSSL_EVP_get_digestbyname(digest);
+    if (!md) {
+        msg(M_FATAL, "Message hash algorithm '%s' not found", digest);
+    }
+    if (wolfSSL_EVP_MD_size(md) > MAX_HMAC_KEY_LENGTH) {
+        msg(M_FATAL, "Message hash algorithm '%s' uses a default hash "
+        		 	 "size (%d bytes) which is larger than " PACKAGE_NAME "'s current "
+					 "maximum hash size (%d bytes)",
+					 digest, EVP_MD_size(md), MAX_HMAC_KEY_LENGTH);
+    }
+    return md;
+}
 
-const char *md_kt_name(const md_kt_t *kt);
+const char *md_kt_name(const md_kt_t *kt) {
+    if (NULL == kt) {
+        return "[null-digest]";
+    }
+    return kt;
+}
 
-int md_kt_size(const md_kt_t *kt);
+int md_kt_size(const md_kt_t *kt) {
+    return wolfSSL_EVP_MD_size(kt);
+}
 
-int md_full(const md_kt_t *kt, const uint8_t *src, int src_len, uint8_t *dst);
+int md_full(const md_kt_t *kt, const uint8_t *src, int src_len, uint8_t *dst) {
+    unsigned int in_md_len = 0;
+    return wolfSSL_EVP_Digest(src, src_len, dst, &in_md_len, kt, NULL);
+}
 
-md_ctx_t *md_ctx_new(void);
+md_ctx_t *md_ctx_new(void) {
+	WOLFSSL_EVP_MD_CTX *ctx = wolfSSL_EVP_MD_CTX_new();
+    check_malloc_return(ctx);
+    return ctx;
+}
 
-void md_ctx_free(md_ctx_t *ctx);
+void md_ctx_free(md_ctx_t *ctx) {
+	wolfSSL_EVP_MD_CTX_free(ctx);
+}
 
-void md_ctx_init(md_ctx_t *ctx, const md_kt_t *kt);
+void md_ctx_init(md_ctx_t *ctx, const md_kt_t *kt) {
+    ASSERT(NULL != ctx && NULL != kt);
 
-void md_ctx_cleanup(md_ctx_t *ctx);
+    wolfSSL_EVP_MD_CTX_init(ctx);
+    wolfSSL_EVP_DigestInit(ctx, kt);
+}
 
-int md_ctx_size(const md_ctx_t *ctx);
+void md_ctx_cleanup(md_ctx_t *ctx) {
+	wolfSSL_EVP_MD_CTX_cleanup(ctx);
+}
 
-void md_ctx_update(md_ctx_t *ctx, const uint8_t *src, int src_len);
+int md_ctx_size(const md_ctx_t *ctx) {
+    return wolfSSL_EVP_MD_CTX_size(ctx);
+}
 
-void md_ctx_final(md_ctx_t *ctx, uint8_t *dst);
+void md_ctx_update(md_ctx_t *ctx, const uint8_t *src, int src_len) {
+	wolfSSL_EVP_DigestUpdate(ctx, src, src_len);
+}
 
-hmac_ctx_t *hmac_ctx_new(void);
+void md_ctx_final(md_ctx_t *ctx, uint8_t *dst) {
+    unsigned int in_md_len = 0;
+    wolfSSL_EVP_DigestFinal(ctx, dst, &in_md_len);
+}
 
-void hmac_ctx_free(hmac_ctx_t *ctx);
+hmac_ctx_t *hmac_ctx_new(void) {
+    int ret;
+	WOLFSSL_HMAC_CTX *ctx = (WOLFSSL_HMAC_CTX*) malloc(sizeof(WOLFSSL_HMAC_CTX));
+    check_malloc_return(ctx);
+    if ((ret = wolfSSL_HMAC_CTX_Init(ctx)) != WOLFSSL_SUCCESS) {
+        msg(M_FATAL, "wolfSSL_HMAC_CTX_Init failed. Errno: %d", ret);
+    }
+    return ctx;
+}
+
+void hmac_ctx_free(hmac_ctx_t *ctx) {
+	wolfSSL_HMAC_cleanup(ctx);
+}
+
+static const WOLFSSL_EVP_MD* wolfSSL_get_MD_from_ctx(const WOLFSSL_HMAC_CTX* ctx)
+{
+    WOLFSSL_ENTER("EVP_DigestFinal");
+    switch (ctx->type) {
+#ifndef NO_MD4
+        case WC_HASH_TYPE_MD4:
+        	return wolfSSL_EVP_md4();
+#endif
+#ifndef NO_MD5
+        case WC_HASH_TYPE_MD5:
+        	return wolfSSL_EVP_md5();
+#endif
+#ifndef NO_SHA
+        case WC_HASH_TYPE_SHA:
+        	return wolfSSL_EVP_md4();
+#endif
+#ifdef WOLFSSL_SHA224
+        case WC_HASH_TYPE_SHA224:
+        	return wolfSSL_EVP_sha1();
+#endif
+#ifndef NO_SHA256
+        case WC_HASH_TYPE_SHA256:
+        	return wolfSSL_EVP_sha256();
+#endif /* !NO_SHA256 */
+#ifdef WOLFSSL_SHA384
+        case WC_HASH_TYPE_SHA384:
+        	return wolfSSL_EVP_sha384();
+#endif
+#ifdef WOLFSSL_SHA512
+        case WC_HASH_TYPE_SHA512:
+        	return wolfSSL_EVP_sha512();
+#endif /* WOLFSSL_SHA512 */
+        default:
+            return NULL;
+    }
+}
 
 void hmac_ctx_init(hmac_ctx_t *ctx, const uint8_t *key, int key_length,
-                   const md_kt_t *kt);
+                   const md_kt_t *kt) {
+	int ret;
+	WOLFSSL_EVP_MD* md;
+    ASSERT(NULL != kt && NULL != ctx);
 
-void hmac_ctx_cleanup(hmac_ctx_t *ctx);
+    if ((ret = wolfSSL_HMAC_cleanup(ctx)) != SSL_SUCCESS) {
+        msg(M_FATAL, "wolfSSL_HMAC_cleanup failed. Errno: %d", ret);
+    }
+    if ((ret = wolfSSL_HMAC_CTX_Init(ctx)) != WOLFSSL_SUCCESS) {
+        msg(M_FATAL, "wolfSSL_HMAC_CTX_Init failed. Errno: %d", ret);
+    }
+    if ((ret = wolfSSL_HMAC_Init_ex(ctx, key, key_length, kt, NULL)) != WOLFSSL_SUCCESS) {
+        msg(M_FATAL, "wolfSSL_HMAC_Init_ex failed. Errno: %d", ret);
+    }
 
-int hmac_ctx_size(const hmac_ctx_t *ctx);
+    /* make sure we used a big enough key */
+    md = wolfSSL_get_MD_from_ctx(ctx);
+    ASSERT(NULL != md);
+    ASSERT(wolfSSL_EVP_MD_size(md) <= key_length);
+}
 
-void hmac_ctx_reset(hmac_ctx_t *ctx);
+void hmac_ctx_cleanup(hmac_ctx_t *ctx) {
+	int ret;
+    if ((ret = wolfSSL_HMAC_cleanup(ctx)) != SSL_SUCCESS) {
+        msg(M_FATAL, "wolfSSL_HMAC_cleanup failed. Errno: %d", ret);
+    }
+    if ((ret = wolfSSL_HMAC_CTX_Init(ctx)) != WOLFSSL_SUCCESS) {
+        msg(M_FATAL, "wolfSSL_HMAC_CTX_Init failed. Errno: %d", ret);
+    }
+}
 
-void hmac_ctx_update(hmac_ctx_t *ctx, const uint8_t *src, int src_len);
+int hmac_ctx_size(const hmac_ctx_t *ctx) {
+	WOLFSSL_EVP_MD* md;
+    md = wolfSSL_get_MD_from_ctx(ctx);
+    ASSERT(NULL != md);
+    return wolfSSL_EVP_MD_size(md);
+}
 
-void hmac_ctx_final(hmac_ctx_t *ctx, uint8_t *dst);
+void hmac_ctx_reset(hmac_ctx_t *ctx) {
+	wolfSSL_HMAC_Init_ex(ctx, NULL, 0, NULL, NULL);
+}
 
-const char *translate_cipher_name_from_openvpn(const char *cipher_name);
+void hmac_ctx_update(hmac_ctx_t *ctx, const uint8_t *src, int src_len) {
+	wolfSSL_HMAC_Update(ctx, src, src_len);
+}
 
-const char *translate_cipher_name_to_openvpn(const char *cipher_name);
+void hmac_ctx_final(hmac_ctx_t *ctx, uint8_t *dst) {
+    unsigned int in_hmac_len = 0;
+    wolfSSL_HMAC_Final(ctx, dst, &in_hmac_len);
+}
 
 #endif /* ENABLE_CRYPTO_WOLFSSL */
