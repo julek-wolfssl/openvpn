@@ -83,12 +83,36 @@ typedef WOLFSSL_HMAC_CTX hmac_ctx_t;
 /* Set if variable length cipher */
 # define EVP_CIPH_VARIABLE_LENGTH 0x8
 
-static inline bool
+inline bool
 cipher_kt_var_key_size(const cipher_kt_t *cipher)
 {
     return wolfSSL_EVP_CIPHER_flags(cipher) & EVP_CIPH_VARIABLE_LENGTH;
 }
 
+const struct cipher{
+        unsigned char type;
+        const char *name;
+} cipher_tbl[] = {
+
+    {AES_128_CBC_TYPE, "AES-128-CBC"},
+    {AES_192_CBC_TYPE, "AES-192-CBC"},
+    {AES_256_CBC_TYPE, "AES-256-CBC"},
+	{AES_128_CTR_TYPE, "AES-128-CTR"},
+	{AES_192_CTR_TYPE, "AES-192-CTR"},
+	{AES_256_CTR_TYPE, "AES-256-CTR"},
+	{AES_128_ECB_TYPE, "AES-128-ECB"},
+	{AES_192_ECB_TYPE, "AES-192-ECB"},
+	{AES_256_ECB_TYPE, "AES-256-ECB"},
+    {DES_CBC_TYPE, "DES-CBC"},
+    {DES_ECB_TYPE, "DES-ECB"},
+    {DES_EDE3_CBC_TYPE, "DES-EDE3-CBC"},
+    {DES_EDE3_ECB_TYPE, "DES-EDE3-ECB"},
+    {ARC4_TYPE, "ARC4"},
+#ifdef HAVE_IDEA
+    {IDEA_CBC_TYPE, "IDEA-CBC"},
+#endif
+    { 0, NULL}
+};
 
 #define CIPHER_LIST_SIZE 1000
 

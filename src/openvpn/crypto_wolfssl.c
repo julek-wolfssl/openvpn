@@ -227,7 +227,8 @@ void cipher_des_encrypt_ecb(const unsigned char key[DES_KEY_LENGTH],
 	WOLFSSL_DES_key_schedule sched;
 
 	wolfSSL_DES_set_key_unchecked((WOLFSSL_DES_cblock *)key, &sched);
-	wolfSSL_DES_ecb_encrypt((WOLFSSL_DES_cblock *)src, (WOLFSSL_DES_cblock *)dst, &sched, DES_ENCRYPT);
+	wolfSSL_DES_ecb_encrypt((WOLFSSL_DES_cblock *)src, (WOLFSSL_DES_cblock *)dst,
+							&sched, DES_ENCRYPT);
 }
 
 const cipher_kt_t *cipher_kt_get(const char *ciphername) {
@@ -250,36 +251,112 @@ int cipher_kt_block_size(const cipher_kt_t *cipher_kt) {
 	return wolfSSL_EVP_CIPHER_block_size(cipher_kt);
 }
 
-int cipher_kt_tag_size(const cipher_kt_t *cipher_kt);
+int cipher_kt_tag_size(const cipher_kt_t *cipher_kt) {
+    if (cipher_kt_mode_aead(cipher_kt)) {
+        return OPENVPN_AEAD_TAG_LENGTH;
+    } else {
+        return 0;
+    }
+}
 
-bool cipher_kt_insecure(const cipher_kt_t *cipher);
+bool cipher_kt_insecure(const cipher_kt_t *cipher) {
+    return !(cipher_kt_block_size(cipher) >= 128 / 8);
+}
 
-int cipher_kt_mode(const cipher_kt_t *cipher_kt);
+int cipher_kt_mode(const cipher_kt_t *cipher_kt) {
+    ASSERT(NULL != cipher_kt);
+    return WOLFSSL_EVP_CIPHER_mode(cipher_kt);
+}
 
-bool cipher_kt_mode_cbc(const cipher_kt_t *cipher);
+bool cipher_kt_mode_cbc(const cipher_kt_t *cipher) {
+    return cipher && cipher_kt_mode(cipher) == OPENVPN_MODE_CBC;
+}
 
-bool cipher_kt_mode_ofb_cfb(const cipher_kt_t *cipher);
+bool cipher_kt_mode_ofb_cfb(const cipher_kt_t *cipher) {
+    return cipher && (cipher_kt_mode(cipher) == OPENVPN_MODE_OFB
+    		          || cipher_kt_mode(cipher) == OPENVPN_MODE_CFB);
+}
 
-bool cipher_kt_mode_aead(const cipher_kt_t *cipher);
+bool cipher_kt_mode_aead(const cipher_kt_t *cipher) {
+#ifdef HAVE_AEAD_CIPHER_MODES
+    msg(M_FATAL, "wolfSSL does not support AEAD ciphers in OpenSSL compatibility layer");
+#endif
 
-cipher_ctx_t *cipher_ctx_new(void);
+    return false;
+}
 
-void cipher_ctx_free(cipher_ctx_t *ctx);
+cipher_ctx_t *cipher_ctx_new(void) {
+	WOLFSSL_EVP_CIPHER_CTX *ctx = wolfSSL_EVP_CIPHER_CTX_new();
+    check_malloc_return(ctx);
+    return ctx;
+}
+
+void cipher_ctx_free(cipher_ctx_t *ctx) {
+	wolfSSL_EVP_CIPHER_CTX_free(ctx);
+}
 
 void cipher_ctx_init(cipher_ctx_t *ctx, const uint8_t *key, int key_len,
-                     const cipher_kt_t *kt, int enc);
+                     const cipher_kt_t *kt, int enc) {
+    ASSERT(NULL != kt && NULL != ctx);
 
-void cipher_ctx_cleanup(cipher_ctx_t *ctx);
+    wolfSSL_EVP_CIPHER_CTX_init(ctx);
+    if (!wolfSSL_EVP_CipherInit(ctx, kt, NULL, NULL, enc))
+    {
+        msg(M_FATAL, "EVP cipher init #1");
+    }
+#ifdef HAVE_EVP_CIPHER_CTX_SET_KEY_LENGTH
+    if (!wolfSSL_EVP_CIPHER_CTX_set_key_length(ctx, key_len))
+    {
+        msg(M_FATAL, "EVP set key size");
+    }
+#endif
+    if (!wolfSSL_EVP_CipherInit_ex(ctx, NULL, NULL, key, NULL, enc))
+    {
+        msg(M_FATAL, "EVP cipher init #2");
+    }
 
-int cipher_ctx_iv_length(const cipher_ctx_t *ctx);
+    /* make sure we used a big enough key */
+    ASSERT(wolfSSL_EVP_CIPHER_CTX_key_length(ctx) <= key_len);
+}
 
-int cipher_ctx_get_tag(cipher_ctx_t *ctx, uint8_t *tag, int tag_len);
+void cipher_ctx_cleanup(cipher_ctx_t *ctx) {
+	wolfSSL_EVP_CIPHER_CTX_cleanup(ctx);
+}
 
-int cipher_ctx_block_size(const cipher_ctx_t *ctx);
+int cipher_ctx_iv_length(const cipher_ctx_t *ctx) {
+    return wolfSSL_EVP_CIPHER_CTX_iv_length(ctx);
+}
 
-int cipher_ctx_mode(const cipher_ctx_t *ctx);
+int cipher_ctx_get_tag(cipher_ctx_t *ctx, uint8_t *tag, int tag_len) {
+#ifdef HAVE_AEAD_CIPHER_MODES
+	msg(M_FATAL, "wolfSSL does not support AEAD ciphers in OpenSSL compatibility layer");
+#else
+    ASSERT(0);
+#endif
+    return 0;
+}
 
-const cipher_kt_t *cipher_ctx_get_cipher_kt(const cipher_ctx_t *ctx);
+int cipher_ctx_block_size(const cipher_ctx_t *ctx) {
+    return wolfSSL_EVP_CIPHER_CTX_block_size(ctx);
+}
+
+int cipher_ctx_mode(const cipher_ctx_t *ctx) {
+    return wolfSSL_EVP_CIPHER_CTX_mode(ctx);
+}
+
+const cipher_kt_t *cipher_ctx_get_cipher_kt(const cipher_ctx_t *ctx) {
+    const struct cipher *ent;
+
+	if (ctx == NULL)
+		return NULL;
+
+    for (ent = cipher_tbl; ent->name != NULL; ent++) {
+        if (ctx->cipherType == ent->type) {
+            return (WOLFSSL_EVP_CIPHER *)ent->name;
+        }
+    }
+	return NULL;
+}
 
 int cipher_ctx_reset(cipher_ctx_t *ctx, const uint8_t *iv_buf);
 

@@ -256,6 +256,13 @@ AC_ARG_ENABLE(
 	[enable_async_push="no"]
 )
 
+AC_ARG_ENABLE(
+	[idea],
+    [AS_HELP_STRING([--enable-idea], [enable IDEA Cipher @<:@default=no@:>@])],
+    ,
+    [enable_idea="no"]
+)
+
 AC_ARG_WITH(
 	[special-build],
 	[AS_HELP_STRING([--with-special-build=STRING], [specify special build string])],
@@ -1026,7 +1033,7 @@ elif test "${with_crypto_library}" = "wolfssl"; then
 	
 	if test -z "${WOLFSSL_CFLAGS}" -a -z "${WOLFSSL_LIBS}"; then
 		# if the user did not explicitly specify flags, try to autodetect
-		LIBS="${LIBS} -lwolfssl"
+		LIBS="${LIBS} -lwolfssl -lm -pthread"
 		AC_CHECK_LIB(
 			[wolfssl],
 			[wc_InitRsaKey],
@@ -1039,6 +1046,16 @@ elif test "${with_crypto_library}" = "wolfssl"; then
 			[],
 			[AC_MSG_ERROR([OpenSSL compatibility layer missing in wolfSSL. This can be fixed by configuring wolfSSL with ./configure --enable-opensslall])]
 		)
+		AC_CHECK_LIB(
+			[wolfssl],
+			[wolfSSL_DES_ecb_encrypt],
+			[],
+			[AC_MSG_ERROR([wolfSSL_DES_ecb_encrypt is missing])]
+		)
+	fi
+	
+	if test "${enable_idea}" = "yes"; then
+		AC_DEFINE([ENABLE_IDEA], [1], [Enable IDEA Cipher])
 	fi
 	
 	CFLAGS="${WOLFSSL_CFLAGS} ${CFLAGS}"
