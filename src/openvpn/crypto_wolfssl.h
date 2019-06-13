@@ -33,6 +33,8 @@
 #include <wolfssl/openssl/hmac.h>
 #include <wolfssl/openssl/ssl.h>
 #include <wolfssl/openssl/objects.h>
+#include <wolfssl/openssl/des.h>
+#include <stdbool.h>
 
 #ifndef __OPENVPN_X509_CERT_T_DECLARED
 #define __OPENVPN_X509_CERT_T_DECLARED
@@ -74,6 +76,16 @@ typedef WOLFSSL_HMAC_CTX hmac_ctx_t;
 
 /** Cipher should decrypt */
 #define OPENVPN_OP_DECRYPT      0
+
+/* Set if variable length cipher */
+# define EVP_CIPH_VARIABLE_LENGTH 0x8
+
+static inline bool
+cipher_kt_var_key_size(const cipher_kt_t *cipher)
+{
+    return wolfSSL_EVP_CIPHER_flags(cipher) & EVP_CIPH_VARIABLE_LENGTH;
+}
+
 
 #define CIPHER_LIST_SIZE 1000
 
