@@ -30,6 +30,7 @@
 #define CRYPTO_WOLFSSL_H_
 
 #define OPENSSL_ALL
+#define DEBUG_WOLFSSL
 
 #include <wolfssl/wolfcrypt/settings.h>
 #include <wolfssl/openssl/evp.h>
@@ -37,13 +38,9 @@
 #include <wolfssl/openssl/ssl.h>
 #include <wolfssl/openssl/objects.h>
 #include <wolfssl/openssl/des.h>
+#include <wolfssl/wolfcrypt/logging.h>
 #include <wolfssl/ssl.h>
 #include <stdbool.h>
-
-#ifndef __OPENVPN_X509_CERT_T_DECLARED
-#define __OPENVPN_X509_CERT_T_DECLARED
-typedef WOLFSSL_X509 openvpn_x509_cert_t;
-#endif
 
 /** Generic cipher key type %context. */
 typedef WOLFSSL_EVP_CIPHER cipher_kt_t;
@@ -82,13 +79,9 @@ typedef WOLFSSL_HMAC_CTX hmac_ctx_t;
 #define OPENVPN_OP_DECRYPT      0
 
 /* Set if variable length cipher */
-# define EVP_CIPH_VARIABLE_LENGTH 0x8
+#define EVP_CIPH_VARIABLE_LENGTH 0x8
 
-inline bool
-cipher_kt_var_key_size(const cipher_kt_t *cipher)
-{
-    return wolfSSL_EVP_CIPHER_flags(cipher) & EVP_CIPH_VARIABLE_LENGTH;
-}
+extern bool cipher_kt_var_key_size(const cipher_kt_t *cipher);
 
 #define CIPHER_LIST_SIZE 1000
 

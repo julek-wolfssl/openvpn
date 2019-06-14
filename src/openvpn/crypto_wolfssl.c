@@ -44,7 +44,9 @@
 
 void crypto_init_lib(void) {
 	int ret;
+
     if ((ret = wolfCrypt_Init()) != 0) {
+        msg(D_CRYPT_ERRORS, "wolfCrypt_Init failed");
         printf("wolfCrypt_Init failed %d\n", ret);
     }
 }
@@ -52,6 +54,7 @@ void crypto_init_lib(void) {
 void crypto_uninit_lib(void) {
 	int ret;
     if ((ret = wolfCrypt_Cleanup()) != 0) {
+        msg(D_CRYPT_ERRORS, "wolfCrypt_Cleanup failed");
         printf("wolfCrypt_Cleanup failed %d\n", ret);
     }
 }
@@ -108,7 +111,7 @@ void show_available_engines(void) {
 bool crypto_pem_encode(const char *name, struct buffer *dst,
                        const struct buffer *src, struct gc_arena *gc) {
     bool ret = false;
-    WOLFSSL_BIO *bio = wolfSSL_BIO_new(BIO_s_mem());
+    WOLFSSL_BIO *bio = wolfSSL_BIO_new(wolfSSL_BIO_s_mem());
     if (!bio || !wolfSSL_PEM_write_bio(bio, name, "", BPTR(src), BLEN(src)))
     {
         ret = false;
@@ -124,7 +127,7 @@ bool crypto_pem_encode(const char *name, struct buffer *dst,
 
     ret = true;
 cleanup:
-    if (!wolfSSL_BIO_free(bio))
+    if (wolfSSL_BIO_free(bio))
     {
         ret = false;
     }
@@ -175,7 +178,7 @@ cleanup:
 	wolfSSL_OPENSSL_free(name_read);
 	wolfSSL_OPENSSL_free(header_read);
 	wolfSSL_OPENSSL_free(data_read);
-    if (!wolfSSL_BIO_free(bio))
+    if (wolfSSL_BIO_free(bio))
     {
         ret = false;
     }
@@ -572,7 +575,6 @@ void hmac_ctx_free(hmac_ctx_t *ctx) {
 
 static const WOLFSSL_EVP_MD* wolfSSL_get_MD_from_ctx(const WOLFSSL_HMAC_CTX* ctx)
 {
-    WOLFSSL_ENTER("EVP_DigestFinal");
     switch (ctx->type) {
 #ifndef NO_MD4
         case WC_HASH_TYPE_MD4:
@@ -657,6 +659,10 @@ void hmac_ctx_update(hmac_ctx_t *ctx, const uint8_t *src, int src_len) {
 void hmac_ctx_final(hmac_ctx_t *ctx, uint8_t *dst) {
     unsigned int in_hmac_len = 0;
     wolfSSL_HMAC_Final(ctx, dst, &in_hmac_len);
+}
+
+extern bool cipher_kt_var_key_size(const cipher_kt_t *cipher) {
+    return wolfSSL_EVP_CIPHER_flags(cipher) & EVP_CIPH_VARIABLE_LENGTH;
 }
 
 #endif /* ENABLE_CRYPTO_WOLFSSL */
