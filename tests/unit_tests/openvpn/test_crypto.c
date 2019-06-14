@@ -44,6 +44,13 @@
 static const char testtext[] = "Dummy text to test PEM encoding";
 
 static void
+show_available_ciphers_digests_test(void **state) {
+	show_available_ciphers();
+	show_available_digests();
+	show_available_engines();
+}
+
+static void
 crypto_pem_encode_decode_loopback(void **state) {
     struct gc_arena gc = gc_new();
     struct buffer src_buf;
@@ -68,10 +75,20 @@ crypto_pem_encode_decode_loopback(void **state) {
     gc_free(&gc);
 }
 
+static void
+rand_bytes_test(void **state) {
+	uint8_t input[10] = {0};
+	uint8_t output[10] = {0};
+	assert_true(rand_bytes(output, 10));
+	assert_memory_not_equal(input, output, 10);
+}
+
 int
 main(void) {
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(crypto_pem_encode_decode_loopback),
+        cmocka_unit_test(show_available_ciphers_digests_test),
+        cmocka_unit_test(rand_bytes_test),
     };
 
 #if defined(ENABLE_CRYPTO_OPENSSL)

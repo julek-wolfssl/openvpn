@@ -98,7 +98,7 @@ void show_available_digests(void) {
         const WOLFSSL_EVP_MD *digest = wolfSSL_EVP_get_digestbynid(nid);
         if (digest) {
             printf("%s %d bit digest size\n",
-            		wolfSSL_OBJ_nid2sn(nid), wolfSSL_EVP_MD_size(digest) * 8);
+            		digest, wolfSSL_EVP_MD_size(digest) * 8);
         }
     }
     printf("\n");
@@ -664,5 +664,15 @@ void hmac_ctx_final(hmac_ctx_t *ctx, uint8_t *dst) {
 extern bool cipher_kt_var_key_size(const cipher_kt_t *cipher) {
     return wolfSSL_EVP_CIPHER_flags(cipher) & EVP_CIPH_VARIABLE_LENGTH;
 }
+
+const cipher_name_pair cipher_name_translation_table[] = {
+    { "AES-128-GCM", "id-aes128-GCM" },
+    { "AES-192-GCM", "id-aes192-GCM" },
+    { "AES-256-GCM", "id-aes256-GCM" },
+    { "CHACHA20-POLY1305", "ChaCha20-Poly1305" },
+};
+const size_t cipher_name_translation_table_count =
+    sizeof(cipher_name_translation_table) / sizeof(*cipher_name_translation_table);
+
 
 #endif /* ENABLE_CRYPTO_WOLFSSL */
