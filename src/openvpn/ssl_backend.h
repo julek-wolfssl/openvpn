@@ -42,6 +42,10 @@
 #include "ssl_verify_mbedtls.h"
 #define SSLAPI SSLAPI_MBEDTLS
 #endif
+#ifdef ENABLE_CRYPTO_WOLFSSL
+#include "ssl_wolfssl.h"
+#define SSLAPI SSLAPI_WOLFSSL
+#endif
 
 /* Ensure that SSLAPI got a sane value if SSL is disabled or unknown */
 #ifndef SSLAPI
