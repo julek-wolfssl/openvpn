@@ -30,7 +30,7 @@
 #define CRYPTO_WOLFSSL_H_
 
 #define OPENSSL_ALL
-#define DEBUG_WOLFSSL
+#define OPENSSL_EXTRAs
 
 #include <wolfssl/wolfcrypt/settings.h>
 #include <wolfssl/openssl/evp.h>

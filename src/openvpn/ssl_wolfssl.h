@@ -29,6 +29,14 @@
 #ifndef SSL_WOLFSSL_H_
 #define SSL_WOLFSSL_H_
 
+
+#define OPENSSL_ALL
+#define OPENSSL_EXTRA
+#define DEBUG_WOLFSSL
+
+#include <wolfssl/wolfcrypt/settings.h>
+#include <wolfssl/ssl.h>
+
 # define TLS1_1_VERSION                  0x0302
 # define TLS1_2_VERSION                  0x0303
 # define TLS1_3_VERSION                  0x0304

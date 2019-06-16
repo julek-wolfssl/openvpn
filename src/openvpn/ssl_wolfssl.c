@@ -91,6 +91,41 @@ bool tls_ctx_initialised(struct tls_root_ctx *ctx) {
     return NULL != ctx->ctx;
 }
 
+static long get_version_options(unsigned int ssl_flags) {
+	long mask = 0;
+	/* Set the minimum TLS version */
+	switch ((ssl_flags >> SSLF_TLS_VERSION_MIN_SHIFT) & SSLF_TLS_VERSION_MIN_MASK) {
+	case TLS_VER_1_3:
+		mask |= SSL_OP_NO_TLSv1_2;
+		/* no break */
+	case TLS_VER_1_2:
+		mask |= SSL_OP_NO_TLSv1_1;
+		/* no break */
+	case TLS_VER_1_1:
+		mask |= SSL_OP_NO_TLSv1;
+		/* no break */
+	case TLS_VER_1_0:
+		mask |= SSL_OP_NO_SSLv3;
+		/* no break */
+	default:
+	}
+	/* Set the maximum TLS version */
+	switch ((ssl_flags >> SSLF_TLS_VERSION_MAX_SHIFT) & SSLF_TLS_VERSION_MAX_MASK) {
+	case TLS_VER_1_0:
+		mask |= SSL_OP_NO_TLSv1_1;
+		/* no break */
+	case TLS_VER_1_1:
+		mask |= SSL_OP_NO_TLSv1_2;
+		/* no break */
+	case TLS_VER_1_2:
+		mask |= SSL_OP_NO_TLSv1_3;
+		/* no break */
+	case TLS_VER_1_3:
+	default:
+	}
+	return mask;
+}
+
 bool tls_ctx_set_options(struct tls_root_ctx *ctx, unsigned int ssl_flags) {
     ASSERT(NULL != ctx);
 
@@ -102,7 +137,9 @@ bool tls_ctx_set_options(struct tls_root_ctx *ctx, unsigned int ssl_flags) {
 				  SSL_OP_ALL;
 
     wolfSSL_CTX_set_options(ctx->ctx, sslopt);
-    wolfSSL_CTX_set_options(ctx->ctx, ssl_flags);
+
+
+    wolfSSL_CTX_set_options(ctx->ctx, get_version_options(ssl_flags));
 
 
     wolfSSL_CTX_set_session_cache_mode(ctx->ctx, WOLFSSL_SESS_CACHE_OFF);
@@ -128,11 +165,129 @@ bool tls_ctx_set_options(struct tls_root_ctx *ctx, unsigned int ssl_flags) {
     return true;
 }
 
-void tls_ctx_restrict_ciphers(struct tls_root_ctx *ctx, const char *ciphers);
+void convert_tls_list_to_openssl(char *openssl_ciphers, size_t len,const char *ciphers) {
+    /* Parse supplied cipher list and pass on to OpenSSL */
+    size_t begin_of_cipher, end_of_cipher;
 
-void tls_ctx_restrict_ciphers_tls13(struct tls_root_ctx *ctx, const char *ciphers);
+    const char *current_cipher;
+    size_t current_cipher_len;
 
-void tls_ctx_set_cert_profile(struct tls_root_ctx *ctx, const char *profile);
+    const tls_cipher_name_pair *cipher_pair;
+
+    size_t openssl_ciphers_len = 0;
+    openssl_ciphers[0] = '\0';
+
+    /* Translate IANA cipher suite names to OpenSSL names */
+    begin_of_cipher = end_of_cipher = 0;
+    for (; begin_of_cipher < strlen(ciphers); begin_of_cipher = end_of_cipher) {
+        end_of_cipher += strcspn(&ciphers[begin_of_cipher], ":");
+        cipher_pair = tls_get_cipher_name_pair(&ciphers[begin_of_cipher], end_of_cipher - begin_of_cipher);
+
+        if (NULL == cipher_pair) {
+            /* No translation found, use original */
+            current_cipher = &ciphers[begin_of_cipher];
+            current_cipher_len = end_of_cipher - begin_of_cipher;
+
+            /* Issue warning on missing translation */
+            /* %.*s format specifier expects length of type int, so guarantee */
+            /* that length is small enough and cast to int. */
+            msg(D_LOW, "No valid translation found for TLS cipher '%.*s'",
+                constrain_int(current_cipher_len, 0, 256), current_cipher);
+        } else {
+            /* Use OpenSSL name */
+            current_cipher = cipher_pair->openssl_name;
+            current_cipher_len = strlen(current_cipher);
+
+            if (end_of_cipher - begin_of_cipher == current_cipher_len
+                && 0 != memcmp(&ciphers[begin_of_cipher], cipher_pair->iana_name,
+                               end_of_cipher - begin_of_cipher)) {
+                /* Non-IANA name used, show warning */
+                msg(M_WARN, "Deprecated TLS cipher name '%s', please use IANA name '%s'", cipher_pair->openssl_name, cipher_pair->iana_name);
+            }
+        }
+
+        /* Make sure new cipher name fits in cipher string */
+        if ((SIZE_MAX - openssl_ciphers_len) < current_cipher_len
+            || (len - 1) < (openssl_ciphers_len + current_cipher_len)) {
+            msg(M_FATAL,
+                "Failed to set restricted TLS cipher list, too long (>%d).",
+                (int)(len - 1));
+        }
+
+        /* Concatenate cipher name to OpenSSL cipher string */
+        memcpy(&openssl_ciphers[openssl_ciphers_len], current_cipher, current_cipher_len);
+        openssl_ciphers_len += current_cipher_len;
+        openssl_ciphers[openssl_ciphers_len] = ':';
+        openssl_ciphers_len++;
+
+        end_of_cipher++;
+    }
+
+    if (openssl_ciphers_len > 0) {
+        openssl_ciphers[openssl_ciphers_len-1] = '\0';
+    }
+}
+
+void tls_ctx_restrict_ciphers(struct tls_root_ctx *ctx, const char *ciphers) {
+    if (ciphers == NULL)
+    {
+        /* Use sane default TLS cipher list */
+        if (wolfSSL_CTX_set_cipher_list(ctx->ctx,
+										/* Use openssl's default list as a basis */
+										 "DEFAULT"
+										/* Disable export ciphers and openssl's 'low' and 'medium' ciphers */
+										":!EXP:!LOW:!MEDIUM"
+										/* Disable static (EC)DH keys (no forward secrecy) */
+										":!kDH:!kECDH"
+										/* Disable DSA private keys */
+										":!DSS"
+										/* Disable unsupported TLS modes */
+										":!PSK:!SRP:!kRSA") != WOLFSSL_SUCCESS)
+        {
+            msg(M_FATAL, "Failed to set default TLS cipher list.");
+        }
+        return;
+    }
+
+    // TODO CHECK IF WOLFSSL ACCEPTS THE OUTPUT OF convert_tls_list_to_openssl
+    char openssl_ciphers[4096];
+    convert_tls_list_to_openssl(openssl_ciphers, sizeof(openssl_ciphers), ciphers);
+
+    ASSERT(NULL != ctx);
+
+    /* Set OpenSSL cipher list */
+    if (!wolfSSL_CTX_set_cipher_list(ctx->ctx, openssl_ciphers))
+    {
+        msg(M_FATAL, "Failed to set restricted TLS cipher list: %s", openssl_ciphers);
+    }
+}
+
+static void convert_tls13_list_to_openssl(char *openssl_ciphers, size_t len,
+                              const char *ciphers){
+    if (strlen(ciphers) >= (len - 1)) {
+        msg(M_FATAL,
+            "Failed to set restricted TLS 1.3 cipher list, too long (>%d).",
+            (int) (len - 1));
+    }
+
+    strncpy(openssl_ciphers, ciphers, len);
+
+    for (size_t i = 0; i < strlen(openssl_ciphers); i++) {
+        if (openssl_ciphers[i] == '-') {
+            openssl_ciphers[i] = '_';
+        }
+    }
+}
+
+
+void tls_ctx_restrict_ciphers_tls13(struct tls_root_ctx *ctx, const char *ciphers) {
+	// TODO CHECK IF tls_ctx_restrict_ciphers_tls13 MAKES SENSE IN WOLFSSL
+    msg(M_FATAL, "tls_ctx_restrict_ciphers_tls13 may not have proper function in wolfSSL");
+}
+
+void tls_ctx_set_cert_profile(struct tls_root_ctx *ctx, const char *profile) {
+    msg(M_WARN, "wolfSSL does not support --tls-cert-profile");
+}
 
 
 
