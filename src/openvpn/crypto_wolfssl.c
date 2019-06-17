@@ -66,129 +66,163 @@ void crypto_init_lib_engine(const char *engine_name) {
 }
 
 void show_available_ciphers(void) {
-    int nid;
-    size_t i;
+    static char ciphers[4096];
+    char* x;
 
-    /* If we ever exceed this, we must be more selective */
-    const cipher_kt_t *cipher_list[CIPHER_LIST_SIZE];
-    size_t num_ciphers = 0;
+    int ret = wolfSSL_get_ciphers(ciphers, (int)sizeof(ciphers));
 
-    for (nid = 0; nid < CIPHER_LIST_SIZE; ++nid) {
-        const cipher_kt_t *cipher = wolfSSL_EVP_get_cipherbynid(nid);
-        if (cipher) {
-            cipher_list[num_ciphers++] = cipher;
-        }
-        if (num_ciphers == CIPHER_LIST_SIZE) {
-            msg(M_INFO, "WARNING: Too many ciphers, not showing all");
-            break;
-        }
+    for (x = ciphers; *x != '\0'; x++) {
+    	if (*x == ':')
+    		*x = '\n';
     }
 
-    for (i = 0; i < num_ciphers; i++) {
-		print_cipher(cipher_list[i]);
-    }
-
-    printf("\n");
+    if (ret == WOLFSSL_SUCCESS)
+        printf("%s\n", ciphers);
 }
 
 void show_available_digests(void) {
-    int nid;
-
-    for (nid = 0; nid < 10000; ++nid) {
-        const WOLFSSL_EVP_MD *digest = wolfSSL_EVP_get_digestbynid(nid);
-        if (digest) {
-            printf("%s %d bit digest size\n",
-            		digest, wolfSSL_EVP_MD_size(digest) * 8);
-        }
-    }
-    printf("\n");
+	#ifdef WOLFSSL_MD2
+        printf("MD2 128 bit digest size\n")
+    #endif
+    #ifndef NO_MD4
+		printf("MD4 128 bit digest size\n");
+    #endif
+    #ifndef NO_MD5
+		printf("MD5 128 bit digest size\n");
+    #endif
+    #ifndef NO_SHA
+		printf("SHA1 160 bit digest size\n");
+    #endif
+    #ifndef NO_SHA256
+		printf("SHA256 256 bit digest size\n");
+    #endif
+    #ifdef WOLFSSL_SHA384
+		printf("SHA384 384 bit digest size\n");
+    #endif
+    #ifdef WOLFSSL_SHA512
+		printf("SHA512 512 bit digest size\n");
+    #endif
 }
 
 void show_available_engines(void) {
     msg(M_INFO, "Note: wolfSSL does not have an engine");
 }
 
+
+#define PEM_BEGIN              "-----BEGIN %s-----\n"
+#define PEM_BEGIN_LEN          17
+#define PEM_BEGIN_NAME_START   11
+#define PEM_END                "-----END %s-----\n"
+#define PEM_END_LEN            15
+
+uint32_t der_to_pem_len(uint32_t der_len) {
+	uint32_t pem_len;
+    pem_len = (der_len + 2) / 3 * 4;
+    pem_len += (pem_len + 63) / 64;
+    return pem_len;
+}
+
 bool crypto_pem_encode(const char *name, struct buffer *dst,
                        const struct buffer *src, struct gc_arena *gc) {
+	uint8_t* pem_buf;
+	uint32_t pem_len = der_to_pem_len(BLEN(src));
+	uint8_t* out_buf;
     bool ret = false;
-    WOLFSSL_BIO *bio = wolfSSL_BIO_new(wolfSSL_BIO_s_mem());
-    if (!bio || !wolfSSL_PEM_write_bio(bio, name, "", BPTR(src), BLEN(src)))
-    {
-        ret = false;
-        goto cleanup;
-    }
+	int err;
+	int name_len = strlen(name);
+	int out_len = PEM_BEGIN_LEN + name_len + pem_len +
+  	  	    	  PEM_END_LEN + name_len;
 
-    WOLFSSL_BUF_MEM *bptr;
-    wolfSSL_BIO_get_mem_ptr(bio, &bptr);
+	if (!(pem_buf = (uint8_t*) malloc(pem_len))) {
+		return false;
+	}
 
-    *dst = alloc_buf_gc(bptr->length + 1, gc);
-    ASSERT(buf_write(dst, bptr->data, bptr->length));
+	if (!(out_buf = (uint8_t*) malloc(out_len))) {
+        goto out_buf_err;
+	}
+
+	if ((err = Base64_Encode(BPTR(src), BLEN(src), pem_buf, &pem_len)) != 0) {
+	    msg(M_INFO, "Base64_Encode failed with Errno: %d", err);
+        goto Base64_Encode_err;
+	}
+
+	sprintf((char*)out_buf, PEM_BEGIN, name);
+	memcpy(out_buf + PEM_BEGIN_LEN + name_len, pem_buf, pem_len);
+	sprintf((char*)(out_buf + PEM_BEGIN_LEN + name_len + pem_len), PEM_END, name);
+
+    *dst = alloc_buf_gc(out_len + 1, gc);
+    ASSERT(buf_write(dst, out_buf, out_len));
     buf_null_terminate(dst);
 
     ret = true;
-cleanup:
-    if (wolfSSL_BIO_free(bio))
-    {
-        ret = false;
-    }
 
-    return ret;
+Base64_Encode_err:
+	free(out_buf);
+out_buf_err:
+	free(pem_buf);
+
+	return ret;
+}
+
+uint32_t pem_to_der_len(uint32_t pem_len) {
+	static int PEM_LINE_SZ = 64;
+	int plainSz = pem_len - ((pem_len + (PEM_LINE_SZ - 1)) / PEM_LINE_SZ );
+    return (plainSz * 3 + 3) / 4;
 }
 
 bool crypto_pem_decode(const char *name, struct buffer *dst,
                        const struct buffer *src) {
+	int name_len = strlen(name);
+	int err;
+	uint8_t* src_buf;
     bool ret = false;
+    unsigned int der_len = BLEN(src) - PEM_BEGIN_LEN - PEM_END_LEN -
+    					   name_len - name_len - 1;
+    unsigned int pem_len = pem_to_der_len(der_len);
 
-    WOLFSSL_BIO *bio = wolfSSL_BIO_new_mem_buf((char *)BPTR(src), BLEN(src));
-    if (!bio)
-    {
+	ASSERT(BLEN(src) > PEM_BEGIN_LEN + PEM_END_LEN);
+
+	if (!(src_buf = (uint8_t*) malloc(BLEN(src)))) {
         msg(M_FATAL, "Cannot open memory BIO for PEM decode");
-    }
+		return false;
+	}
+	memcpy(src_buf, BPTR(src), BLEN(src));
 
-    char *name_read = NULL;
-    char *header_read = NULL;
-    uint8_t *data_read = NULL;
-    long data_read_len = 0;
-    if (!wolfSSL_PEM_read_bio(bio, &name_read, &header_read, &data_read,
-                      	  	  &data_read_len))
-    {
-        msg(D_CRYPT_ERRORS, "%s: PEM decode failed", __func__);
-        goto cleanup;
-    }
+	src_buf[PEM_BEGIN_NAME_START + name_len] = '\0';
 
-    if (strcmp(name, name_read))
-    {
+	if (strcmp((char*)(src_buf + PEM_BEGIN_NAME_START), name)) {
         msg(D_CRYPT_ERRORS,
 		    "%s: unexpected PEM name (got '%s', expected '%s')",
-            __func__, name_read, name);
+            __func__, src_buf + PEM_BEGIN_NAME_START, name);
         goto cleanup;
-    }
+	}
 
-    uint8_t *dst_data = buf_write_alloc(dst, data_read_len);
+	if ((err = Base64_Decode(BPTR(src) + PEM_BEGIN_LEN + name_len,
+							 der_len, src_buf, &pem_len)) != 0) {
+	    msg(M_INFO, "Base64_Decode failed with Errno: %d", err);
+        goto cleanup;
+	}
+
+    uint8_t *dst_data = buf_write_alloc(dst, pem_len);
     if (!dst_data)
     {
-        msg(D_CRYPT_ERRORS, "%s: dst too small (%i, needs %li)", __func__,
-            BCAP(dst), data_read_len);
+        msg(D_CRYPT_ERRORS, "%s: dst too small (%i, needs %i)", __func__,
+            BCAP(dst), pem_len);
         goto cleanup;
     }
-    memcpy(dst_data, data_read, data_read_len);
 
-    ret = true;
+    memcpy(dst_data, src_buf, pem_len);
+
+	ret = true;
+
 cleanup:
-	wolfSSL_OPENSSL_free(name_read);
-	wolfSSL_OPENSSL_free(header_read);
-	wolfSSL_OPENSSL_free(data_read);
-    if (wolfSSL_BIO_free(bio))
-    {
-        ret = false;
-    }
-
-    return ret;
+	free(src_buf);
+	return ret;
 }
 
 int rand_bytes(uint8_t *output, int len) {
-    if (unlikely(WOLFSSL_SUCCESS != wolfSSL_RAND_bytes(output, len))) {
-    	msg(D_CRYPT_ERRORS, "wolfSSL_RAND_bytes() failed");
+    if (unlikely(WOLFSSL_SUCCESS != RAND_bytes(output, len))) {
+    	msg(D_CRYPT_ERRORS, "RAND_bytes() failed");
         return 0;
     }
     return 1;
@@ -198,7 +232,7 @@ int key_des_num_cblocks(const cipher_kt_t *kt) {
     int ret = 0;
     if (kt && !strncmp(kt, "DES-", 4))
     {
-		ret = wolfSSL_EVP_Cipher_key_length(kt) / sizeof(WOLFSSL_DES_cblock);
+		ret = EVP_CIPHER_key_length(kt) / sizeof(DES_cblock);
 
     }
     msg(D_CRYPTO_DEBUG, "CRYPTO INFO: n_DES_cblocks=%d", ret);
@@ -234,11 +268,11 @@ static const unsigned char odd_parity[256] = {
     254
 };
 
-static int DES_check_key_parity(WOLFSSL_const_DES_cblock *key)
+static int DES_check_key_parity(const DES_cblock *key)
 {
     unsigned int i;
 
-    for (i = 0; i < sizeof(WOLFSSL_DES_cblock); i++) {
+    for (i = 0; i < sizeof(DES_cblock); i++) {
         if ((*key)[i] != odd_parity[(*key)[i]])
             return 0;
     }
@@ -254,13 +288,13 @@ bool key_des_check(uint8_t *key, int key_len, int ndc) {
 
     for (i = 0; i < ndc; ++i)
     {
-    	WOLFSSL_DES_cblock *dc = (WOLFSSL_DES_cblock *) buf_read_alloc(&b, sizeof(WOLFSSL_DES_cblock));
+    	DES_cblock *dc = (DES_cblock *) buf_read_alloc(&b, sizeof(DES_cblock));
         if (!dc)
         {
         	msg(D_CRYPT_ERRORS, "CRYPTO INFO: check_key_DES: insufficient key material");
             goto err;
         }
-        if (wolfSSL_DES_is_weak_key(dc))
+        if (DES_is_weak_key(dc))
         {
         	msg(D_CRYPT_ERRORS, "CRYPTO INFO: check_key_DES: weak key detected");
             goto err;
@@ -274,7 +308,7 @@ bool key_des_check(uint8_t *key, int key_len, int ndc) {
     return true;
 
 err:
-	wolfSSL_ERR_clear_error();
+	ERR_clear_error();
     return false;
 }
 
@@ -285,29 +319,44 @@ void key_des_fixup(uint8_t *key, int key_len, int ndc) {
     buf_set_read(&b, key, key_len);
     for (i = 0; i < ndc; ++i)
     {
-    	WOLFSSL_DES_cblock *dc = (WOLFSSL_DES_cblock *) buf_read_alloc(&b, sizeof(WOLFSSL_DES_cblock));
+    	DES_cblock *dc = (DES_cblock *) buf_read_alloc(&b, sizeof(DES_cblock));
         if (!dc)
         {
             msg(D_CRYPT_ERRORS, "CRYPTO INFO: fixup_key_DES: insufficient key material");
-            wolfSSL_ERR_clear_error();
+            ERR_clear_error();
             return;
         }
-        wolfSSL_DES_set_odd_parity(dc);
+        DES_set_odd_parity(dc);
     }
 }
 
 void cipher_des_encrypt_ecb(const unsigned char key[DES_KEY_LENGTH],
                             unsigned char src[DES_KEY_LENGTH],
                             unsigned char dst[DES_KEY_LENGTH]) {
-	WOLFSSL_DES_key_schedule sched;
+	DES_key_schedule sched;
+    Des myDes;
 
-	wolfSSL_DES_set_key_unchecked((WOLFSSL_DES_cblock *)key, &sched);
-	wolfSSL_DES_ecb_encrypt((WOLFSSL_DES_cblock *)src, (WOLFSSL_DES_cblock *)dst,
-							&sched, DES_ENCRYPT);
+    if (key != NULL) {
+        memcpy(sched, key, sizeof(DES_key_schedule));
+    }
+
+    if (src == NULL || dst == NULL) {
+    	msg(D_CRYPT_ERRORS, "Bad argument passed to cipher_des_encrypt_ecb");
+    } else {
+        if (wc_Des_SetKey(&myDes, (const byte*) &sched,
+                           (const byte*) NULL, !DES_ENCRYPT) != 0) {
+        	msg(D_CRYPT_ERRORS, "wc_Des_SetKey return error.");
+            return;
+        }
+		if (wc_Des_EcbEncrypt(&myDes, (byte*) dst, (const byte*) src,
+					sizeof(DES_cblock)) != 0){
+			msg(D_CRYPT_ERRORS, "wc_Des_EcbEncrypt return error.");
+		}
+    }
 }
 
 const cipher_kt_t *cipher_kt_get(const char *ciphername) {
-	return wolfSSL_EVP_get_cipherbyname(ciphername);
+	return EVP_get_cipherbyname(ciphername);
 }
 
 const char *cipher_kt_name(const cipher_kt_t *cipher_kt) {
@@ -315,15 +364,15 @@ const char *cipher_kt_name(const cipher_kt_t *cipher_kt) {
 }
 
 int cipher_kt_key_size(const cipher_kt_t *cipher_kt) {
-	return wolfSSL_EVP_Cipher_key_length(cipher_kt);
+	return EVP_CIPHER_key_length(cipher_kt);
 }
 
 int cipher_kt_iv_size(const cipher_kt_t *cipher_kt) {
-	return wolfSSL_EVP_CIPHER_iv_length(cipher_kt);
+	return EVP_CIPHER_iv_length(cipher_kt);
 }
 
 int cipher_kt_block_size(const cipher_kt_t *cipher_kt) {
-	return wolfSSL_EVP_CIPHER_block_size(cipher_kt);
+	return EVP_CIPHER_block_size(cipher_kt);
 }
 
 int cipher_kt_tag_size(const cipher_kt_t *cipher_kt) {
@@ -361,45 +410,46 @@ bool cipher_kt_mode_aead(const cipher_kt_t *cipher) {
 }
 
 cipher_ctx_t *cipher_ctx_new(void) {
-	WOLFSSL_EVP_CIPHER_CTX *ctx = wolfSSL_EVP_CIPHER_CTX_new();
+	cipher_ctx_t *ctx = (cipher_ctx_t*) malloc(sizeof *ctx);
     check_malloc_return(ctx);
+    EVP_CIPHER_CTX_init(ctx);
     return ctx;
 }
 
 void cipher_ctx_free(cipher_ctx_t *ctx) {
-	wolfSSL_EVP_CIPHER_CTX_free(ctx);
+	EVP_CIPHER_CTX_free(ctx);
 }
 
 void cipher_ctx_init(cipher_ctx_t *ctx, const uint8_t *key, int key_len,
                      const cipher_kt_t *kt, int enc) {
     ASSERT(NULL != kt && NULL != ctx);
 
-    wolfSSL_EVP_CIPHER_CTX_init(ctx);
-    if (!wolfSSL_EVP_CipherInit(ctx, kt, NULL, NULL, enc))
+    EVP_CIPHER_CTX_init(ctx);
+    if (!EVP_CipherInit(ctx, kt, NULL, NULL, enc))
     {
         msg(M_FATAL, "EVP cipher init #1");
     }
 #ifdef HAVE_EVP_CIPHER_CTX_SET_KEY_LENGTH
-    if (!wolfSSL_EVP_CIPHER_CTX_set_key_length(ctx, key_len))
+    if (!EVP_CIPHER_CTX_set_key_length(ctx, key_len))
     {
         msg(M_FATAL, "EVP set key size");
     }
 #endif
-    if (!wolfSSL_EVP_CipherInit_ex(ctx, NULL, NULL, key, NULL, enc))
+    if (!EVP_CipherInit(ctx, NULL,  key, NULL, enc))
     {
         msg(M_FATAL, "EVP cipher init #2");
     }
 
     /* make sure we used a big enough key */
-    ASSERT(wolfSSL_EVP_CIPHER_CTX_key_length(ctx) <= key_len);
+    ASSERT(EVP_CIPHER_CTX_key_length(ctx) <= key_len);
 }
 
 void cipher_ctx_cleanup(cipher_ctx_t *ctx) {
-	wolfSSL_EVP_CIPHER_CTX_cleanup(ctx);
+	EVP_CIPHER_CTX_cleanup(ctx);
 }
 
 int cipher_ctx_iv_length(const cipher_ctx_t *ctx) {
-    return wolfSSL_EVP_CIPHER_CTX_iv_length(ctx);
+    return EVP_CIPHER_CTX_iv_length(ctx);
 }
 
 int cipher_ctx_get_tag(cipher_ctx_t *ctx, uint8_t *tag, int tag_len) {
@@ -412,11 +462,11 @@ int cipher_ctx_get_tag(cipher_ctx_t *ctx, uint8_t *tag, int tag_len) {
 }
 
 int cipher_ctx_block_size(const cipher_ctx_t *ctx) {
-    return wolfSSL_EVP_CIPHER_CTX_block_size(ctx);
+    return EVP_CIPHER_CTX_block_size(ctx);
 }
 
 int cipher_ctx_mode(const cipher_ctx_t *ctx) {
-    return wolfSSL_EVP_CIPHER_CTX_mode(ctx);
+    return EVP_CIPHER_CTX_mode(ctx);
 }
 
 const cipher_kt_t *cipher_ctx_get_cipher_kt(const cipher_ctx_t *ctx) {
@@ -452,14 +502,14 @@ const cipher_kt_t *cipher_ctx_get_cipher_kt(const cipher_ctx_t *ctx) {
 
     for (ent = cipher_tbl; ent->name != NULL; ent++) {
         if (ctx->cipherType == ent->type) {
-            return (WOLFSSL_EVP_CIPHER *)ent->name;
+            return (EVP_CIPHER *)ent->name;
         }
     }
 	return NULL;
 }
 
 int cipher_ctx_reset(cipher_ctx_t *ctx, const uint8_t *iv_buf) {
-    return wolfSSL_EVP_CipherInit_ex(ctx, NULL, NULL, NULL, iv_buf, -1);
+    return EVP_CipherInit(ctx, NULL, NULL, iv_buf, -1);
 }
 
 int cipher_ctx_update_ad(cipher_ctx_t *ctx, const uint8_t *src, int src_len) {
@@ -473,14 +523,14 @@ int cipher_ctx_update_ad(cipher_ctx_t *ctx, const uint8_t *src, int src_len) {
 
 int cipher_ctx_update(cipher_ctx_t *ctx, uint8_t *dst, int *dst_len,
                       uint8_t *src, int src_len) {
-    if (!wolfSSL_EVP_CipherUpdate(ctx, dst, dst_len, src, src_len)) {
-        msg(M_FATAL, "%s: wolfSSL_EVP_CipherUpdate() failed", __func__);
+    if (!EVP_CipherUpdate(ctx, dst, dst_len, src, src_len)) {
+        msg(M_FATAL, "%s: EVP_CipherUpdate() failed", __func__);
     }
     return 1;
 }
 
 int cipher_ctx_final(cipher_ctx_t *ctx, uint8_t *dst, int *dst_len) {
-    return wolfSSL_EVP_CipherFinal(ctx, dst, dst_len);
+    return EVP_CipherFinal(ctx, dst, dst_len);
 }
 
 int cipher_ctx_final_check_tag(cipher_ctx_t *ctx, uint8_t *dst, int *dst_len,
@@ -494,13 +544,13 @@ int cipher_ctx_final_check_tag(cipher_ctx_t *ctx, uint8_t *dst, int *dst_len,
 }
 
 const md_kt_t *md_kt_get(const char *digest) {
-    const WOLFSSL_EVP_MD *md = NULL;
+    const EVP_MD *md = NULL;
     ASSERT(digest);
-    md = wolfSSL_EVP_get_digestbyname(digest);
+    md = EVP_get_digestbyname(digest);
     if (!md) {
         msg(M_FATAL, "Message hash algorithm '%s' not found", digest);
     }
-    if (wolfSSL_EVP_MD_size(md) > MAX_HMAC_KEY_LENGTH) {
+    if (EVP_MD_size(md) > MAX_HMAC_KEY_LENGTH) {
         msg(M_FATAL, "Message hash algorithm '%s' uses a default hash "
         		 	 "size (%d bytes) which is larger than " PACKAGE_NAME "'s current "
 					 "maximum hash size (%d bytes)",
@@ -517,63 +567,63 @@ const char *md_kt_name(const md_kt_t *kt) {
 }
 
 int md_kt_size(const md_kt_t *kt) {
-    return wolfSSL_EVP_MD_size(kt);
+    return EVP_MD_size(kt);
 }
 
 int md_full(const md_kt_t *kt, const uint8_t *src, int src_len, uint8_t *dst) {
     unsigned int in_md_len = 0;
-    return wolfSSL_EVP_Digest(src, src_len, dst, &in_md_len, kt, NULL);
+    return EVP_Digest(src, src_len, dst, &in_md_len, kt, NULL);
 }
 
 md_ctx_t *md_ctx_new(void) {
-	WOLFSSL_EVP_MD_CTX *ctx = wolfSSL_EVP_MD_CTX_new();
+	EVP_MD_CTX *ctx = EVP_MD_CTX_new();
     check_malloc_return(ctx);
     return ctx;
 }
 
 void md_ctx_free(md_ctx_t *ctx) {
-	wolfSSL_EVP_MD_CTX_free(ctx);
+	EVP_MD_CTX_free(ctx);
 }
 
 void md_ctx_init(md_ctx_t *ctx, const md_kt_t *kt) {
     ASSERT(NULL != ctx && NULL != kt);
 
-    wolfSSL_EVP_MD_CTX_init(ctx);
-    wolfSSL_EVP_DigestInit(ctx, kt);
+    EVP_MD_CTX_init(ctx);
+    EVP_DigestInit(ctx, kt);
 }
 
 void md_ctx_cleanup(md_ctx_t *ctx) {
-	wolfSSL_EVP_MD_CTX_cleanup(ctx);
+	EVP_MD_CTX_cleanup(ctx);
 }
 
 int md_ctx_size(const md_ctx_t *ctx) {
-    return wolfSSL_EVP_MD_CTX_size(ctx);
+    return EVP_MD_CTX_size(ctx);
 }
 
 void md_ctx_update(md_ctx_t *ctx, const uint8_t *src, int src_len) {
-	wolfSSL_EVP_DigestUpdate(ctx, src, src_len);
+	EVP_DigestUpdate(ctx, src, src_len);
 }
 
 void md_ctx_final(md_ctx_t *ctx, uint8_t *dst) {
     unsigned int in_md_len = 0;
-    wolfSSL_EVP_DigestFinal(ctx, dst, &in_md_len);
+    EVP_DigestFinal(ctx, dst, &in_md_len);
 }
 
 hmac_ctx_t *hmac_ctx_new(void) {
     int ret;
-	WOLFSSL_HMAC_CTX *ctx = (WOLFSSL_HMAC_CTX*) malloc(sizeof(WOLFSSL_HMAC_CTX));
+	HMAC_CTX *ctx = (HMAC_CTX*) malloc(sizeof(HMAC_CTX));
     check_malloc_return(ctx);
-    if ((ret = wolfSSL_HMAC_CTX_Init(ctx)) != WOLFSSL_SUCCESS) {
-        msg(M_FATAL, "wolfSSL_HMAC_CTX_Init failed. Errno: %d", ret);
+    if ((ret = HMAC_CTX_init(ctx)) != WOLFSSL_SUCCESS) {
+        msg(M_FATAL, "HMAC_CTX_Init failed. Errno: %d", ret);
     }
     return ctx;
 }
 
 void hmac_ctx_free(hmac_ctx_t *ctx) {
-	wolfSSL_HMAC_cleanup(ctx);
+	HMAC_cleanup(ctx);
 }
 
-static const WOLFSSL_EVP_MD* wolfSSL_get_MD_from_ctx(const WOLFSSL_HMAC_CTX* ctx)
+static const EVP_MD* wolfSSL_get_MD_from_ctx(const HMAC_CTX* ctx)
 {
     switch (ctx->type) {
 #ifndef NO_MD4
@@ -612,57 +662,57 @@ static const WOLFSSL_EVP_MD* wolfSSL_get_MD_from_ctx(const WOLFSSL_HMAC_CTX* ctx
 void hmac_ctx_init(hmac_ctx_t *ctx, const uint8_t *key, int key_length,
                    const md_kt_t *kt) {
 	int ret;
-	WOLFSSL_EVP_MD* md;
+	const EVP_MD* md;
     ASSERT(NULL != kt && NULL != ctx);
 
-    if ((ret = wolfSSL_HMAC_cleanup(ctx)) != SSL_SUCCESS) {
-        msg(M_FATAL, "wolfSSL_HMAC_cleanup failed. Errno: %d", ret);
+    if ((ret = HMAC_cleanup(ctx)) != SSL_SUCCESS) {
+        msg(M_FATAL, "HMAC_cleanup failed. Errno: %d", ret);
     }
-    if ((ret = wolfSSL_HMAC_CTX_Init(ctx)) != WOLFSSL_SUCCESS) {
-        msg(M_FATAL, "wolfSSL_HMAC_CTX_Init failed. Errno: %d", ret);
+    if ((ret = HMAC_CTX_init(ctx)) != WOLFSSL_SUCCESS) {
+        msg(M_FATAL, "HMAC_CTX_Init failed. Errno: %d", ret);
     }
-    if ((ret = wolfSSL_HMAC_Init_ex(ctx, key, key_length, kt, NULL)) != WOLFSSL_SUCCESS) {
-        msg(M_FATAL, "wolfSSL_HMAC_Init_ex failed. Errno: %d", ret);
+    if ((ret = HMAC_Init(ctx, key, key_length, kt)) != WOLFSSL_SUCCESS) {
+        msg(M_FATAL, "HMAC_Init_ex failed. Errno: %d", ret);
     }
 
     /* make sure we used a big enough key */
     md = wolfSSL_get_MD_from_ctx(ctx);
     ASSERT(NULL != md);
-    ASSERT(wolfSSL_EVP_MD_size(md) <= key_length);
+    ASSERT(EVP_MD_size(md) <= key_length);
 }
 
 void hmac_ctx_cleanup(hmac_ctx_t *ctx) {
 	int ret;
-    if ((ret = wolfSSL_HMAC_cleanup(ctx)) != SSL_SUCCESS) {
+    if ((ret = HMAC_cleanup(ctx)) != SSL_SUCCESS) {
         msg(M_FATAL, "wolfSSL_HMAC_cleanup failed. Errno: %d", ret);
     }
-    if ((ret = wolfSSL_HMAC_CTX_Init(ctx)) != WOLFSSL_SUCCESS) {
+    if ((ret = HMAC_CTX_init(ctx)) != WOLFSSL_SUCCESS) {
         msg(M_FATAL, "wolfSSL_HMAC_CTX_Init failed. Errno: %d", ret);
     }
 }
 
 int hmac_ctx_size(const hmac_ctx_t *ctx) {
-	WOLFSSL_EVP_MD* md;
+	const EVP_MD* md;
     md = wolfSSL_get_MD_from_ctx(ctx);
     ASSERT(NULL != md);
-    return wolfSSL_EVP_MD_size(md);
+    return EVP_MD_size(md);
 }
 
 void hmac_ctx_reset(hmac_ctx_t *ctx) {
-	wolfSSL_HMAC_Init_ex(ctx, NULL, 0, NULL, NULL);
+	HMAC_Init_ex(ctx, NULL, 0, NULL, NULL);
 }
 
 void hmac_ctx_update(hmac_ctx_t *ctx, const uint8_t *src, int src_len) {
-	wolfSSL_HMAC_Update(ctx, src, src_len);
+	HMAC_Update(ctx, src, src_len);
 }
 
 void hmac_ctx_final(hmac_ctx_t *ctx, uint8_t *dst) {
     unsigned int in_hmac_len = 0;
-    wolfSSL_HMAC_Final(ctx, dst, &in_hmac_len);
+    HMAC_Final(ctx, dst, &in_hmac_len);
 }
 
 extern bool cipher_kt_var_key_size(const cipher_kt_t *cipher) {
-    return wolfSSL_EVP_CIPHER_flags(cipher) & EVP_CIPH_VARIABLE_LENGTH;
+    return EVP_CIPHER_flags(cipher) & EVP_CIPH_VARIABLE_LENGTH;
 }
 
 const cipher_name_pair cipher_name_translation_table[] = {

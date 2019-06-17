@@ -38,24 +38,27 @@
 #include <wolfssl/openssl/ssl.h>
 #include <wolfssl/openssl/objects.h>
 #include <wolfssl/openssl/des.h>
+#include <wolfssl/openssl/hmac.h>
 #include <wolfssl/wolfcrypt/logging.h>
+#include <wolfssl/wolfcrypt/wc_port.h>
+#include <wolfssl/wolfcrypt/coding.h>
 #include <wolfssl/ssl.h>
 #include <stdbool.h>
 
 /** Generic cipher key type %context. */
-typedef WOLFSSL_EVP_CIPHER cipher_kt_t;
+typedef EVP_CIPHER cipher_kt_t;
 
 /** Generic message digest key type %context. */
-typedef WOLFSSL_EVP_MD md_kt_t;
+typedef EVP_MD md_kt_t;
 
 /** Generic cipher %context. */
-typedef WOLFSSL_EVP_CIPHER_CTX cipher_ctx_t;
+typedef EVP_CIPHER_CTX cipher_ctx_t;
 
 /** Generic message digest %context. */
-typedef WOLFSSL_EVP_MD_CTX md_ctx_t;
+typedef EVP_MD_CTX md_ctx_t;
 
 /** Generic HMAC %context. */
-typedef WOLFSSL_HMAC_CTX hmac_ctx_t;
+typedef HMAC_CTX hmac_ctx_t;
 
 /** Maximum length of an IV */
 #define OPENVPN_MAX_IV_LENGTH   16
