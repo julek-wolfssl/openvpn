@@ -235,20 +235,45 @@ cleanup:
 }
 
 int rand_bytes(uint8_t *output, int len) {
-    if (unlikely(WOLFSSL_SUCCESS != RAND_bytes(output, len))) {
-    	msg(D_CRYPT_ERRORS, "RAND_bytes() failed");
-        return 0;
-    }
-    return 1;
+	WC_RNG rng;
+	int ret;
+
+	if ((ret = wc_InitRng(&rng)) != 0){
+	    msg(D_CRYPT_ERRORS, "wc_InitRng failed Errno: %d", ret);
+	    return 0;
+	}
+
+	if ((ret = wc_RNG_GenerateBlock(&rng, output, len)) != 0){
+	    msg(D_CRYPT_ERRORS, "wc_RNG_GenerateBlock failed Errno: %d", ret);
+	    return 0;
+	}
+
+	if ((ret = wc_FreeRng(&rng)) != 0){
+	    msg(D_CRYPT_ERRORS, "wc_FreeRng failed Errno: %d", ret);
+	    return 0;
+	}
+
+	return 1;
 }
 
 int key_des_num_cblocks(const cipher_kt_t *kt) {
     int ret = 0;
-    if (kt && !strncmp(kt, "DES-", 4))
-    {
-		ret = EVP_CIPHER_key_length(kt) / sizeof(DES_cblock);
 
+    if (kt) {
+        switch (*kt) {
+        case OV_WC_DES_CBC_TYPE:
+        case OV_WC_DES_ECB_TYPE:
+        	ret = DES_KEY_SIZE/DES_BLOCK_SIZE;
+        	break;
+        case OV_WC_DES_EDE3_CBC_TYPE:
+        case OV_WC_DES_EDE3_ECB_TYPE:
+        	ret = DES3_KEY_SIZE/DES_BLOCK_SIZE;
+        	break;
+        default:
+        	ret = 0;
+        }
     }
+
     msg(D_CRYPTO_DEBUG, "CRYPTO INFO: n_DES_cblocks=%d", ret);
     return ret;
 }
@@ -282,15 +307,88 @@ static const unsigned char odd_parity[256] = {
     254
 };
 
-static int DES_check_key_parity(const DES_cblock *key)
+static int DES_check_key_parity(const uint8_t *key)
 {
     unsigned int i;
 
-    for (i = 0; i < sizeof(DES_cblock); i++) {
-        if ((*key)[i] != odd_parity[(*key)[i]])
+    for (i = 0; i < DES_BLOCK_SIZE; i++) {
+        if (key[i] != odd_parity[key[i]])
             return 0;
     }
     return 1;
+}
+
+
+/* return true in fail case (1) */
+static int DES_check(word32 mask, word32 mask2, uint8_t* key)
+{
+    word32 value[2];
+
+    value[0] = mask;
+    value[1] = mask2;
+    return (memcmp(value, key, sizeof(value)) == 0)? 1: 0;
+}
+
+/* check is not weak. Weak key list from Nist "Recommendation for the Triple
+ * Data Encryption Algorithm (TDEA) Block Cipher"
+ *
+ * returns 1 if is weak 0 if not
+ */
+static int wolfSSL_DES_is_weak_key(uint8_t* key) {
+    word32 mask, mask2;
+
+    mask = 0x01010101; mask2 = 0x01010101;
+    if (DES_check(mask, mask2, key)) {
+        return 1;
+    }
+
+    mask = 0xFEFEFEFE; mask2 = 0xFEFEFEFE;
+    if (DES_check(mask, mask2, key)) {
+        return 1;
+    }
+
+    mask = 0xE0E0E0E0; mask2 = 0xF1F1F1F1;
+    if (DES_check(mask, mask2, key)) {
+        return 1;
+    }
+
+    mask = 0x1F1F1F1F; mask2 = 0x0E0E0E0E;
+    if (DES_check(mask, mask2, key)) {
+        return 1;
+    }
+
+    /* semi-weak *key check (list from same Nist paper) */
+    mask  = 0x011F011F; mask2 = 0x010E010E;
+    if (DES_check(mask, mask2, key) ||
+       DES_check(ByteReverseWord32(mask), ByteReverseWord32(mask2), key)) {
+        return 1;
+    }
+
+    mask  = 0x01E001E0; mask2 = 0x01F101F1;
+    if (DES_check(mask, mask2, key) ||
+       DES_check(ByteReverseWord32(mask), ByteReverseWord32(mask2), key)) {
+        return 1;
+    }
+
+    mask  = 0x01FE01FE; mask2 = 0x01FE01FE;
+    if (DES_check(mask, mask2, key) ||
+       DES_check(ByteReverseWord32(mask), ByteReverseWord32(mask2), key)) {
+        return 1;
+    }
+
+    mask  = 0x1FE01FE0; mask2 = 0x0EF10EF1;
+    if (DES_check(mask, mask2, key) ||
+       DES_check(ByteReverseWord32(mask), ByteReverseWord32(mask2), key)) {
+        return 1;
+    }
+
+    mask  = 0x1FFE1FFE; mask2 = 0x0EFE0EFE;
+    if (DES_check(mask, mask2, key) ||
+       DES_check(ByteReverseWord32(mask), ByteReverseWord32(mask2), key)) {
+        return 1;
+    }
+
+    return 0;
 }
 
 
@@ -302,28 +400,46 @@ bool key_des_check(uint8_t *key, int key_len, int ndc) {
 
     for (i = 0; i < ndc; ++i)
     {
-    	DES_cblock *dc = (DES_cblock *) buf_read_alloc(&b, sizeof(DES_cblock));
+    	uint8_t *dc = (uint8_t *) buf_read_alloc(&b, DES_KEY_SIZE);
         if (!dc)
         {
         	msg(D_CRYPT_ERRORS, "CRYPTO INFO: check_key_DES: insufficient key material");
-            goto err;
+            return false;
         }
-        if (DES_is_weak_key(dc))
+        if (wolfSSL_DES_is_weak_key(dc))
         {
         	msg(D_CRYPT_ERRORS, "CRYPTO INFO: check_key_DES: weak key detected");
-            goto err;
+            return false;
         }
         if (!DES_check_key_parity(dc))
         {
         	msg(D_CRYPT_ERRORS, "CRYPTO INFO: check_key_DES: bad parity detected");
-            goto err;
+            return false;
         }
     }
     return true;
 
-err:
-	ERR_clear_error();
-    return false;
+}
+
+/* Sets the parity of the DES key for use */
+void wolfSSL_DES_set_odd_parity(uint8_t* myDes)
+{
+    uint32_t i;
+
+    for (i = 0; i < DES_BLOCK_SIZE; i++) {
+    	uint8_t c = myDes[i];
+        if ((
+            ((c >> 1) & 0x01) ^
+            ((c >> 2) & 0x01) ^
+            ((c >> 3) & 0x01) ^
+            ((c >> 4) & 0x01) ^
+            ((c >> 5) & 0x01) ^
+            ((c >> 6) & 0x01) ^
+            ((c >> 7) & 0x01)) != 1) {
+            msg(D_CRYPTO_DEBUG, "Setting odd parity bit");
+            myDes[i] = *((unsigned char*)myDes + i) | 0x01;
+        }
+    }
 }
 
 void key_des_fixup(uint8_t *key, int key_len, int ndc) {
@@ -333,60 +449,117 @@ void key_des_fixup(uint8_t *key, int key_len, int ndc) {
     buf_set_read(&b, key, key_len);
     for (i = 0; i < ndc; ++i)
     {
-    	DES_cblock *dc = (DES_cblock *) buf_read_alloc(&b, sizeof(DES_cblock));
+    	uint8_t *dc = (uint8_t *) buf_read_alloc(&b, DES_BLOCK_SIZE);
         if (!dc)
         {
             msg(D_CRYPT_ERRORS, "CRYPTO INFO: fixup_key_DES: insufficient key material");
-            ERR_clear_error();
             return;
         }
-        DES_set_odd_parity(dc);
+        wolfSSL_DES_set_odd_parity(dc);
     }
 }
 
 void cipher_des_encrypt_ecb(const unsigned char key[DES_KEY_LENGTH],
                             unsigned char src[DES_KEY_LENGTH],
                             unsigned char dst[DES_KEY_LENGTH]) {
-	DES_key_schedule sched;
-    Des myDes;
+	Des myDes;
 
-    if (key != NULL) {
-        memcpy(sched, key, sizeof(DES_key_schedule));
-    }
-
-    if (src == NULL || dst == NULL) {
+    if (src == NULL || dst == NULL || key == NULL) {
     	msg(D_CRYPT_ERRORS, "Bad argument passed to cipher_des_encrypt_ecb");
-    } else {
-        if (wc_Des_SetKey(&myDes, (const byte*) &sched,
-                           (const byte*) NULL, !DES_ENCRYPT) != 0) {
-        	msg(D_CRYPT_ERRORS, "wc_Des_SetKey return error.");
-            return;
-        }
-		if (wc_Des_EcbEncrypt(&myDes, (byte*) dst, (const byte*) src,
-					sizeof(DES_cblock)) != 0){
-			msg(D_CRYPT_ERRORS, "wc_Des_EcbEncrypt return error.");
-		}
     }
+
+	wc_Des_SetKey(&myDes, key, NULL, DES_ENCRYPTION);
+	wc_Des_EcbEncrypt(&myDes, dst, src, DES_KEY_LENGTH);
 }
 
 const cipher_kt_t *cipher_kt_get(const char *ciphername) {
-	return EVP_get_cipherbyname(ciphername);
+	const struct cipher* cipher;
+
+    for (cipher = cipher_tbl; cipher->name != NULL; cipher++) {
+        if(strncmp(ciphername, cipher->name, strlen(cipher->name)+1) == 0) {
+            return &cipher_static[cipher->type];
+        }
+    }
+	return NULL;
 }
 
 const char *cipher_kt_name(const cipher_kt_t *cipher_kt) {
-	return cipher_kt;
+	if (*cipher_kt >= OV_WC_NULL_CIPHER_TYPE) {
+		return NULL;
+	} else {
+		return cipher_tbl[*cipher_kt].name;
+	}
 }
 
 int cipher_kt_key_size(const cipher_kt_t *cipher_kt) {
-	return EVP_CIPHER_key_length(cipher_kt);
+    if (cipher_kt == NULL) {
+        return 0;
+    }
+    switch (*cipher_kt) {
+	case OV_WC_AES_128_CBC_TYPE:  return 16;
+	case OV_WC_AES_192_CBC_TYPE:  return 24;
+	case OV_WC_AES_256_CBC_TYPE:  return 32;
+	case OV_WC_AES_128_CTR_TYPE:  return 16;
+	case OV_WC_AES_192_CTR_TYPE:  return 24;
+	case OV_WC_AES_256_CTR_TYPE:  return 32;
+	case OV_WC_AES_128_ECB_TYPE:  return 16;
+	case OV_WC_AES_192_ECB_TYPE:  return 24;
+	case OV_WC_AES_256_ECB_TYPE:  return 32;
+	case OV_WC_AES_128_OFB_TYPE:  return 16;
+	case OV_WC_AES_192_OFB_TYPE:  return 24;
+	case OV_WC_AES_256_OFB_TYPE:  return 32;
+	case OV_WC_AES_128_CFB_TYPE:  return 16;
+	case OV_WC_AES_192_CFB_TYPE:  return 24;
+	case OV_WC_AES_256_CFB_TYPE:  return 32;
+	case OV_WC_AES_128_GCM_TYPE:  return 16;
+	case OV_WC_AES_192_GCM_TYPE:  return 24;
+	case OV_WC_AES_256_GCM_TYPE:  return 32;
+	case OV_WC_DES_CBC_TYPE:      return 8;
+	case OV_WC_DES_ECB_TYPE:      return 8;
+	case OV_WC_DES_EDE3_CBC_TYPE: return 24;
+	case OV_WC_DES_EDE3_ECB_TYPE: return 24;
+	case OV_WC_NULL_CIPHER_TYPE: return 0;
+    }
+    return 0;
 }
 
 int cipher_kt_iv_size(const cipher_kt_t *cipher_kt) {
-	return EVP_CIPHER_iv_length(cipher_kt);
+	return cipher_kt_block_size(cipher_kt);
 }
 
 int cipher_kt_block_size(const cipher_kt_t *cipher_kt) {
-	return EVP_CIPHER_block_size(cipher_kt);
+    if (cipher_kt == NULL) {
+        return 0;
+    }
+    switch (*cipher_kt) {
+    case OV_WC_AES_128_CBC_TYPE:
+    case OV_WC_AES_192_CBC_TYPE:
+    case OV_WC_AES_256_CBC_TYPE:
+    case OV_WC_AES_128_CTR_TYPE:
+    case OV_WC_AES_192_CTR_TYPE:
+    case OV_WC_AES_256_CTR_TYPE:
+    case OV_WC_AES_128_ECB_TYPE:
+    case OV_WC_AES_192_ECB_TYPE:
+    case OV_WC_AES_256_ECB_TYPE:
+    case OV_WC_AES_128_OFB_TYPE:
+    case OV_WC_AES_192_OFB_TYPE:
+    case OV_WC_AES_256_OFB_TYPE:
+    case OV_WC_AES_128_CFB_TYPE:
+    case OV_WC_AES_192_CFB_TYPE:
+    case OV_WC_AES_256_CFB_TYPE:
+    case OV_WC_AES_128_GCM_TYPE:
+    case OV_WC_AES_192_GCM_TYPE:
+    case OV_WC_AES_256_GCM_TYPE:
+    	return AES_BLOCK_SIZE;
+    case OV_WC_DES_CBC_TYPE:
+    case OV_WC_DES_ECB_TYPE:
+    case OV_WC_DES_EDE3_CBC_TYPE:
+    case OV_WC_DES_EDE3_ECB_TYPE:
+    	return DES_BLOCK_SIZE;
+    case OV_WC_NULL_CIPHER_TYPE:
+    	return 0;
+    }
+	return 0;
 }
 
 int cipher_kt_tag_size(const cipher_kt_t *cipher_kt) {
@@ -402,8 +575,30 @@ bool cipher_kt_insecure(const cipher_kt_t *cipher) {
 }
 
 int cipher_kt_mode(const cipher_kt_t *cipher_kt) {
-    ASSERT(NULL != cipher_kt);
-    return WOLFSSL_EVP_CIPHER_mode(cipher_kt);
+    if (cipher_kt == NULL) {
+        return 0;
+    }
+    switch (*cipher_kt) {
+    case OV_WC_AES_128_CBC_TYPE:
+    case OV_WC_AES_192_CBC_TYPE:
+    case OV_WC_AES_256_CBC_TYPE:
+    case OV_WC_DES_CBC_TYPE:
+    case OV_WC_DES_EDE3_CBC_TYPE:
+		return OPENVPN_MODE_CBC;
+	case OV_WC_AES_128_OFB_TYPE:
+	case OV_WC_AES_192_OFB_TYPE:
+	case OV_WC_AES_256_OFB_TYPE:
+		return OPENVPN_MODE_OFB;
+	case OV_WC_AES_128_CFB_TYPE:
+	case OV_WC_AES_192_CFB_TYPE:
+	case OV_WC_AES_256_CFB_TYPE:
+		return OPENVPN_MODE_CFB;
+	case OV_WC_AES_128_GCM_TYPE:
+	case OV_WC_AES_192_GCM_TYPE:
+	case OV_WC_AES_256_GCM_TYPE:
+		return OPENVPN_MODE_GCM;
+	}
+    return 0;
 }
 
 bool cipher_kt_mode_cbc(const cipher_kt_t *cipher) {
@@ -423,15 +618,22 @@ bool cipher_kt_mode_aead(const cipher_kt_t *cipher) {
     return false;
 }
 
+static void wc_cipher_init(cipher_ctx_t* ctx) {
+	ctx->cipher_type = OV_WC_NULL_CIPHER_TYPE;
+	ctx->enc = OV_WC_ENCRYPT;
+}
+
 cipher_ctx_t *cipher_ctx_new(void) {
 	cipher_ctx_t *ctx = (cipher_ctx_t*) malloc(sizeof *ctx);
     check_malloc_return(ctx);
-    EVP_CIPHER_CTX_init(ctx);
+    wc_cipher_init(ctx);
     return ctx;
 }
 
 void cipher_ctx_free(cipher_ctx_t *ctx) {
-	EVP_CIPHER_CTX_free(ctx);
+	if (ctx) {
+		free(ctx);
+	}
 }
 
 void cipher_ctx_init(cipher_ctx_t *ctx, const uint8_t *key, int key_len,
