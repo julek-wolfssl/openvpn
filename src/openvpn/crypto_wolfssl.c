@@ -518,6 +518,7 @@ int cipher_kt_key_size(const cipher_kt_t *cipher_kt) {
 	case OV_WC_DES_ECB_TYPE:      return 8;
 	case OV_WC_DES_EDE3_CBC_TYPE: return 24;
 	case OV_WC_DES_EDE3_ECB_TYPE: return 24;
+	case OV_WC_CHACHA20_POLY1305_TYPE: return CHACHA20_POLY1305_AEAD_KEYSIZE;
 	case OV_WC_NULL_CIPHER_TYPE: return 0;
     }
     return 0;
@@ -556,6 +557,8 @@ int cipher_kt_block_size(const cipher_kt_t *cipher_kt) {
     case OV_WC_DES_EDE3_CBC_TYPE:
     case OV_WC_DES_EDE3_ECB_TYPE:
     	return DES_BLOCK_SIZE;
+    case OV_WC_CHACHA20_POLY1305_TYPE:
+    	return CHACHA_CHUNK_WORDS;
     case OV_WC_NULL_CIPHER_TYPE:
     	return 0;
     }
@@ -596,7 +599,10 @@ int cipher_kt_mode(const cipher_kt_t *cipher_kt) {
 	case OV_WC_AES_128_GCM_TYPE:
 	case OV_WC_AES_192_GCM_TYPE:
 	case OV_WC_AES_256_GCM_TYPE:
+	case OV_WC_CHACHA20_POLY1305_TYPE:
 		return OPENVPN_MODE_GCM;
+	case OV_WC_NULL_CIPHER_TYPE:
+		break;
 	}
     return 0;
 }
@@ -636,28 +642,158 @@ void cipher_ctx_free(cipher_ctx_t *ctx) {
 	}
 }
 
+static void check_key_length(const cipher_kt_t kt, int key_len) {
+    switch (kt) {
+    /* CHECK KEY LENGTHS */
+    case OV_WC_AES_128_CBC_TYPE:
+    case OV_WC_AES_128_CTR_TYPE:
+    case OV_WC_AES_128_ECB_TYPE:
+    case OV_WC_AES_128_OFB_TYPE:
+    case OV_WC_AES_128_CFB_TYPE:
+    case OV_WC_AES_128_GCM_TYPE:
+    	if (key_len != 16) {
+            msg(M_FATAL,
+				"Wrong key length for chosen cipher.\n"
+				"Cipher chosen: %s\n"
+				"Key length expected: %d\n"
+				"Key length provided: %d\n",
+			cipher_kt_name(&kt), 16, key_len);
+    	}
+    	return;
+    case OV_WC_AES_192_CBC_TYPE:
+    case OV_WC_AES_192_CTR_TYPE:
+    case OV_WC_AES_192_ECB_TYPE:
+    case OV_WC_AES_192_OFB_TYPE:
+    case OV_WC_AES_192_CFB_TYPE:
+    case OV_WC_AES_192_GCM_TYPE:
+    	if (key_len != 24) {
+            msg(M_FATAL,
+				"Wrong key length for chosen cipher.\n"
+				"Cipher chosen: %s\n"
+				"Key length expected: %d\n"
+				"Key length provided: %d\n",
+			cipher_kt_name(&kt), 24, key_len);
+    	}
+    	return;
+    case OV_WC_AES_256_CBC_TYPE:
+    case OV_WC_AES_256_CTR_TYPE:
+    case OV_WC_AES_256_ECB_TYPE:
+    case OV_WC_AES_256_OFB_TYPE:
+    case OV_WC_AES_256_CFB_TYPE:
+    case OV_WC_AES_256_GCM_TYPE:
+    	if (key_len != 32) {
+            msg(M_FATAL,
+				"Wrong key length for chosen cipher.\n"
+				"Cipher chosen: %s\n"
+				"Key length expected: %d\n"
+				"Key length provided: %d\n",
+			cipher_kt_name(&kt), 32, key_len);
+    	}
+    	return;
+    case OV_WC_DES_CBC_TYPE:
+    case OV_WC_DES_ECB_TYPE:
+    	if (key_len != DES_KEY_SIZE) {
+            msg(M_FATAL,
+				"Wrong key length for chosen cipher.\n"
+				"Cipher chosen: %s\n"
+				"Key length expected: %d\n"
+				"Key length provided: %d\n",
+			cipher_kt_name(&kt), DES_KEY_SIZE, key_len);
+    	}
+    	return;
+    case OV_WC_DES_EDE3_CBC_TYPE:
+    case OV_WC_DES_EDE3_ECB_TYPE:
+    	if (key_len != DES3_KEY_SIZE) {
+            msg(M_FATAL,
+				"Wrong key length for chosen cipher.\n"
+				"Cipher chosen: %s\n"
+				"Key length expected: %d\n"
+				"Key length provided: %d\n",
+			cipher_kt_name(&kt), DES3_KEY_SIZE, key_len);
+    	}
+    	return;
+    case OV_WC_CHACHA20_POLY1305_TYPE:
+    	if (key_len != CHACHA20_POLY1305_AEAD_KEYSIZE) {
+            msg(M_FATAL,
+				"Wrong key length for chosen cipher.\n"
+				"Cipher chosen: %s\n"
+				"Key length expected: %d\n"
+				"Key length provided: %d\n",
+			cipher_kt_name(&kt), CHACHA20_POLY1305_AEAD_KEYSIZE, key_len);
+    	}
+    	return;
+    case OV_WC_NULL_CIPHER_TYPE:
+    	break;
+    }
+	msg(M_FATAL, "Invalid cipher.");
+}
+
 void cipher_ctx_init(cipher_ctx_t *ctx, const uint8_t *key, int key_len,
                      const cipher_kt_t *kt, int enc) {
-    ASSERT(NULL != kt && NULL != ctx);
+	int ret;
+    ASSERT(NULL != kt && NULL != ctx && NULL != key);
 
-    EVP_CIPHER_CTX_init(ctx);
-    if (!EVP_CipherInit(ctx, kt, NULL, NULL, enc))
-    {
-        msg(M_FATAL, "EVP cipher init #1");
-    }
-#ifdef HAVE_EVP_CIPHER_CTX_SET_KEY_LENGTH
-    if (!EVP_CIPHER_CTX_set_key_length(ctx, key_len))
-    {
-        msg(M_FATAL, "EVP set key size");
-    }
-#endif
-    if (!EVP_CipherInit(ctx, NULL,  key, NULL, enc))
-    {
-        msg(M_FATAL, "EVP cipher init #2");
-    }
+    check_key_length(*kt, key_len);
 
-    /* make sure we used a big enough key */
-    ASSERT(EVP_CIPHER_CTX_key_length(ctx) <= key_len);
+    switch (*kt) {
+    /* SETUP AES */
+    case OV_WC_AES_128_CBC_TYPE:
+    case OV_WC_AES_128_CTR_TYPE:
+    case OV_WC_AES_128_ECB_TYPE:
+    case OV_WC_AES_128_OFB_TYPE:
+    case OV_WC_AES_128_CFB_TYPE:
+    case OV_WC_AES_128_GCM_TYPE:
+    case OV_WC_AES_192_CBC_TYPE:
+    case OV_WC_AES_192_CTR_TYPE:
+    case OV_WC_AES_192_ECB_TYPE:
+    case OV_WC_AES_192_OFB_TYPE:
+    case OV_WC_AES_192_CFB_TYPE:
+    case OV_WC_AES_192_GCM_TYPE:
+    case OV_WC_AES_256_CBC_TYPE:
+    case OV_WC_AES_256_CTR_TYPE:
+    case OV_WC_AES_256_ECB_TYPE:
+    case OV_WC_AES_256_OFB_TYPE:
+    case OV_WC_AES_256_CFB_TYPE:
+    case OV_WC_AES_256_GCM_TYPE:
+    	if ((ret = wc_AesSetKey(
+    			&ctx->cipher.aes, key, key_len, NULL,
+				enc == OPENVPN_OP_ENCRYPT ? AES_ENCRYPTION : AES_DECRYPTION
+			)) != 0) {
+            msg(M_FATAL, "wc_AesSetKey failed with Errno: %d", ret);
+    	}
+    	break;
+    case OV_WC_DES_CBC_TYPE:
+    case OV_WC_DES_ECB_TYPE:
+    	if ((ret = wc_Des_SetKey(
+    			&ctx->cipher.des, key, NULL,
+				enc == OPENVPN_OP_ENCRYPT ? DES_ENCRYPTION : DES_DECRYPTION
+			)) != 0) {
+            msg(M_FATAL, "wc_Des_SetKey failed with Errno: %d", ret);
+    	}
+    	break;
+    case OV_WC_DES_EDE3_CBC_TYPE:
+    case OV_WC_DES_EDE3_ECB_TYPE:
+    	if ((ret = wc_Des3_SetKey(
+    			&ctx->cipher.des3, key, NULL,
+				enc == OPENVPN_OP_ENCRYPT ? DES_ENCRYPTION : DES_DECRYPTION
+			)) != 0) {
+            msg(M_FATAL, "wc_Des3_SetKey failed with Errno: %d", ret);
+    	}
+    	break;
+    case OV_WC_CHACHA20_POLY1305_TYPE:
+        if ((ret = wc_Chacha_SetKey(&ctx->cipher.chacha20_poly1305.chacha,
+        					   key, CHACHA20_POLY1305_AEAD_KEYSIZE)) != 0) {
+            msg(M_FATAL, "wc_Des3_SetKey failed with Errno: %d", ret);
+        }
+        ctx->cipher.chacha20_poly1305.iv_set = false;
+        memcpy(ctx->cipher.chacha20_poly1305.poly1305Key, key,
+        	   CHACHA20_POLY1305_AEAD_KEYSIZE);
+    	break;
+    case OV_WC_NULL_CIPHER_TYPE:
+    	break;
+    }
+	ctx->cipher_type = *kt;
+	ctx->enc = enc == OPENVPN_OP_ENCRYPT ? OV_WC_ENCRYPT : OV_WC_DECRYPT;
 }
 
 void cipher_ctx_cleanup(cipher_ctx_t *ctx) {

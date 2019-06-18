@@ -256,13 +256,6 @@ AC_ARG_ENABLE(
 	[enable_async_push="no"]
 )
 
-AC_ARG_ENABLE(
-	[idea],
-    [AS_HELP_STRING([--enable-idea], [enable IDEA Cipher @<:@default=no@:>@])],
-    ,
-    [enable_idea="no"]
-)
-
 AC_ARG_WITH(
 	[special-build],
 	[AS_HELP_STRING([--with-special-build=STRING], [specify special build string])],
@@ -1021,10 +1014,6 @@ elif test "${with_crypto_library}" = "mbedtls"; then
 	CRYPTO_CFLAGS="${MBEDTLS_CFLAGS}"
 	CRYPTO_LIBS="${MBEDTLS_LIBS}"
 elif test "${with_crypto_library}" = "wolfssl"; then
-	if test "${enable_plugins}" = "yes"; then
-		AC_MSG_ERROR([Compiling OpenVPN with plugins not supported. Use --disable-plugins to disable plugins])
-	fi
-
 	AC_ARG_VAR([WOLFSSL_CFLAGS], [C compiler flags for wolfssl])
 	AC_ARG_VAR([WOLFSSL_LIBS], [linker flags for wolfssl])
 	
@@ -1036,26 +1025,10 @@ elif test "${with_crypto_library}" = "wolfssl"; then
 		LIBS="${LIBS} -lwolfssl -lm -pthread"
 		AC_CHECK_LIB(
 			[wolfssl],
-			[wc_InitRsaKey],
+			[wolfSSL_get_ciphers],
 			[],
 			[AC_MSG_ERROR([Could not link wolfSSL library.])]
 		)
-		AC_CHECK_LIB(
-			[wolfssl],
-			[wolfSSL_EVP_CipherInit_ex],
-			[],
-			[AC_MSG_ERROR([OpenSSL compatibility layer missing in wolfSSL. This can be fixed by configuring wolfSSL with ./configure --enable-opensslall])]
-		)
-		AC_CHECK_LIB(
-			[wolfssl],
-			[wolfSSL_DES_ecb_encrypt],
-			[],
-			[AC_MSG_ERROR([wolfSSL_DES_ecb_encrypt is missing])]
-		)
-	fi
-	
-	if test "${enable_idea}" = "yes"; then
-		AC_DEFINE([ENABLE_IDEA], [1], [Enable IDEA Cipher])
 	fi
 	
 	CFLAGS="${WOLFSSL_CFLAGS} ${CFLAGS}"

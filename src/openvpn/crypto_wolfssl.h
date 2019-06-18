@@ -50,6 +50,8 @@
 #include <wolfssl/wolfcrypt/sha512.h>
 #include <wolfssl/wolfcrypt/ripemd.h>
 #include <wolfssl/wolfcrypt/chacha.h>
+#include <wolfssl/wolfcrypt/chacha20_poly1305.h>
+#include <wolfssl/wolfcrypt/poly1305.h>
 
 #include <wolfssl/wolfcrypt/hmac.h>
 #include <wolfssl/wolfcrypt/random.h>
@@ -68,6 +70,7 @@
 
 /** Generic cipher key type %context. */
 typedef enum {
+	/** DO NOT CHANGE ORDER OF ELEMENTS */
 	OV_WC_AES_128_CBC_TYPE = 0,
 	OV_WC_AES_192_CBC_TYPE,
 	OV_WC_AES_256_CBC_TYPE,
@@ -90,6 +93,7 @@ typedef enum {
 	OV_WC_DES_ECB_TYPE,
 	OV_WC_DES_EDE3_CBC_TYPE,
 	OV_WC_DES_EDE3_ECB_TYPE,
+	OV_WC_CHACHA20_POLY1305_TYPE,
 	OV_WC_NULL_CIPHER_TYPE,
 } cipher_kt_t;
 
@@ -117,6 +121,7 @@ const cipher_kt_t cipher_static[] = {
 	OV_WC_DES_ECB_TYPE,
 	OV_WC_DES_EDE3_CBC_TYPE,
 	OV_WC_DES_EDE3_ECB_TYPE,
+	OV_WC_CHACHA20_POLY1305_TYPE,
 	OV_WC_NULL_CIPHER_TYPE,
 };
 
@@ -147,6 +152,7 @@ const struct cipher{
     {OV_WC_DES_ECB_TYPE, "DES-ECB"},
     {OV_WC_DES_EDE3_CBC_TYPE, "DES-EDE3-CBC"},
     {OV_WC_DES_EDE3_ECB_TYPE, "DES-EDE3-ECB"},
+    {OV_WC_CHACHA20_POLY1305_TYPE, "CHACHA20-POLY1305"},
     { 0, NULL}
 };
 
@@ -161,7 +167,11 @@ typedef struct {
 	    Des3 des3;
 	#endif
 	#ifdef HAVE_CHACHA
-	    ChaCha chacha;
+	    struct {
+	    	ChaCha chacha;
+	    	bool iv_set;
+	        uint8_t poly1305Key[CHACHA20_POLY1305_AEAD_KEYSIZE];
+	    } chacha20_poly1305;
 	#endif
 	} cipher;
 	cipher_kt_t cipher_type;
