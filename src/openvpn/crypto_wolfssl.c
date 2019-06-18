@@ -109,11 +109,12 @@ void show_available_engines(void) {
 }
 
 
-#define PEM_BEGIN              "-----BEGIN %s-----\n"
-#define PEM_BEGIN_LEN          17
-#define PEM_BEGIN_NAME_START   11
-#define PEM_END                "-----END %s-----\n"
-#define PEM_END_LEN            15
+#define PEM_BEGIN              "-----BEGIN "
+#define PEM_BEGIN_LEN          11
+#define PEM_LINE_END           "-----\n"
+#define PEM_LINE_END_LEN       6
+#define PEM_END                "-----END "
+#define PEM_END_LEN            9
 
 uint32_t der_to_pem_len(uint32_t der_len) {
 	uint32_t pem_len;
@@ -127,11 +128,12 @@ bool crypto_pem_encode(const char *name, struct buffer *dst,
 	uint8_t* pem_buf;
 	uint32_t pem_len = der_to_pem_len(BLEN(src));
 	uint8_t* out_buf;
+	uint8_t* out_buf_ptr;
     bool ret = false;
 	int err;
 	int name_len = strlen(name);
-	int out_len = PEM_BEGIN_LEN + name_len + pem_len +
-  	  	    	  PEM_END_LEN + name_len;
+	int out_len = PEM_BEGIN_LEN + PEM_LINE_END_LEN + name_len + pem_len +
+  	  	    	  PEM_END_LEN + PEM_LINE_END_LEN + name_len;
 
 	if (!(pem_buf = (uint8_t*) malloc(pem_len))) {
 		return false;
@@ -146,9 +148,20 @@ bool crypto_pem_encode(const char *name, struct buffer *dst,
         goto Base64_Encode_err;
 	}
 
-	sprintf((char*)out_buf, PEM_BEGIN, name);
-	memcpy(out_buf + PEM_BEGIN_LEN + name_len, pem_buf, pem_len);
-	sprintf((char*)(out_buf + PEM_BEGIN_LEN + name_len + pem_len), PEM_END, name);
+	out_buf_ptr = out_buf;
+	memcpy(out_buf_ptr, PEM_BEGIN, PEM_BEGIN_LEN);
+	out_buf_ptr += PEM_BEGIN_LEN;
+	memcpy(out_buf_ptr, name, name_len);
+	out_buf_ptr += name_len;
+	memcpy(out_buf_ptr, PEM_LINE_END, PEM_LINE_END_LEN);
+	out_buf_ptr += PEM_LINE_END_LEN;
+	memcpy(out_buf_ptr, pem_buf, pem_len);
+	out_buf_ptr += pem_len;
+	memcpy(out_buf_ptr, PEM_END, PEM_END_LEN);
+	out_buf_ptr += PEM_END_LEN;
+	memcpy(out_buf_ptr, name, name_len);
+	out_buf_ptr += name_len;
+	memcpy(out_buf_ptr, PEM_LINE_END, PEM_LINE_END_LEN);
 
     *dst = alloc_buf_gc(out_len + 1, gc);
     ASSERT(buf_write(dst, out_buf, out_len));
@@ -176,11 +189,12 @@ bool crypto_pem_decode(const char *name, struct buffer *dst,
 	int err;
 	uint8_t* src_buf;
     bool ret = false;
-    unsigned int der_len = BLEN(src) - PEM_BEGIN_LEN - PEM_END_LEN -
+    unsigned int der_len = BLEN(src) - PEM_BEGIN_LEN - PEM_LINE_END_LEN -
+    					   PEM_END_LEN - PEM_LINE_END_LEN -
     					   name_len - name_len - 1;
     unsigned int pem_len = pem_to_der_len(der_len);
 
-	ASSERT(BLEN(src) > PEM_BEGIN_LEN + PEM_END_LEN);
+	ASSERT(BLEN(src) > PEM_BEGIN_LEN + PEM_LINE_END_LEN + PEM_END_LEN + PEM_LINE_END_LEN);
 
 	if (!(src_buf = (uint8_t*) malloc(BLEN(src)))) {
         msg(M_FATAL, "Cannot open memory BIO for PEM decode");
@@ -188,16 +202,16 @@ bool crypto_pem_decode(const char *name, struct buffer *dst,
 	}
 	memcpy(src_buf, BPTR(src), BLEN(src));
 
-	src_buf[PEM_BEGIN_NAME_START + name_len] = '\0';
+	src_buf[PEM_BEGIN_LEN + name_len] = '\0';
 
-	if (strcmp((char*)(src_buf + PEM_BEGIN_NAME_START), name)) {
+	if (strcmp((char*)(src_buf + PEM_BEGIN_LEN), name)) {
         msg(D_CRYPT_ERRORS,
 		    "%s: unexpected PEM name (got '%s', expected '%s')",
-            __func__, src_buf + PEM_BEGIN_NAME_START, name);
+            __func__, src_buf + PEM_BEGIN_LEN, name);
         goto cleanup;
 	}
 
-	if ((err = Base64_Decode(BPTR(src) + PEM_BEGIN_LEN + name_len,
+	if ((err = Base64_Decode(BPTR(src) + PEM_BEGIN_LEN + PEM_LINE_END_LEN + name_len,
 							 der_len, src_buf, &pem_len)) != 0) {
 	    msg(M_INFO, "Base64_Decode failed with Errno: %d", err);
         goto cleanup;
