@@ -525,7 +525,40 @@ int cipher_kt_key_size(const cipher_kt_t *cipher_kt) {
 }
 
 int cipher_kt_iv_size(const cipher_kt_t *cipher_kt) {
-	return cipher_kt_block_size(cipher_kt);
+    if (cipher_kt == NULL) {
+        return 0;
+    }
+    switch (*cipher_kt) {
+	case OV_WC_AES_128_CBC_TYPE:
+	case OV_WC_AES_192_CBC_TYPE:
+	case OV_WC_AES_256_CBC_TYPE:
+	case OV_WC_AES_128_CTR_TYPE:
+	case OV_WC_AES_192_CTR_TYPE:
+	case OV_WC_AES_256_CTR_TYPE:
+	case OV_WC_AES_128_ECB_TYPE:
+	case OV_WC_AES_192_ECB_TYPE:
+	case OV_WC_AES_256_ECB_TYPE:
+	case OV_WC_AES_128_OFB_TYPE:
+	case OV_WC_AES_192_OFB_TYPE:
+	case OV_WC_AES_256_OFB_TYPE:
+	case OV_WC_AES_128_CFB_TYPE:
+	case OV_WC_AES_192_CFB_TYPE:
+	case OV_WC_AES_256_CFB_TYPE:
+	case OV_WC_AES_128_GCM_TYPE:
+	case OV_WC_AES_192_GCM_TYPE:
+	case OV_WC_AES_256_GCM_TYPE:
+		return AES_BLOCK_SIZE;
+	case OV_WC_DES_CBC_TYPE:
+	case OV_WC_DES_ECB_TYPE:
+	case OV_WC_DES_EDE3_CBC_TYPE:
+	case OV_WC_DES_EDE3_ECB_TYPE:
+		return DES_BLOCK_SIZE;
+	case OV_WC_CHACHA20_POLY1305_TYPE:
+		return CHACHA_IV_BYTES;
+	case OV_WC_NULL_CIPHER_TYPE:
+		return 0;
+    }
+    return 0;
 }
 
 int cipher_kt_block_size(const cipher_kt_t *cipher_kt) {
@@ -618,9 +651,16 @@ bool cipher_kt_mode_ofb_cfb(const cipher_kt_t *cipher) {
 
 bool cipher_kt_mode_aead(const cipher_kt_t *cipher) {
 #ifdef HAVE_AEAD_CIPHER_MODES
-    msg(M_FATAL, "wolfSSL does not support AEAD ciphers in OpenSSL compatibility layer");
+    if (cipher) {
+    	switch (*cipher) {
+    	case OV_WC_AES_128_GCM_TYPE:
+    	case OV_WC_AES_192_GCM_TYPE:
+    	case OV_WC_AES_256_GCM_TYPE:
+    	case OV_WC_CHACHA20_POLY1305_TYPE:
+    		return true;
+    	}
+    }
 #endif
-
     return false;
 }
 
@@ -728,12 +768,9 @@ static void check_key_length(const cipher_kt_t kt, int key_len) {
 	msg(M_FATAL, "Invalid cipher.");
 }
 
-void cipher_ctx_init(cipher_ctx_t *ctx, const uint8_t *key, int key_len,
-                     const cipher_kt_t *kt, int enc) {
+int wolfssl_ctx_init(cipher_ctx_t *ctx, const uint8_t *key, int key_len, const uint8_t* iv,
+					 const cipher_kt_t *kt, int enc) {
 	int ret;
-    ASSERT(NULL != kt && NULL != ctx && NULL != key);
-
-    check_key_length(*kt, key_len);
 
     switch (*kt) {
     /* SETUP AES */
@@ -755,53 +792,111 @@ void cipher_ctx_init(cipher_ctx_t *ctx, const uint8_t *key, int key_len,
     case OV_WC_AES_256_OFB_TYPE:
     case OV_WC_AES_256_CFB_TYPE:
     case OV_WC_AES_256_GCM_TYPE:
-    	if ((ret = wc_AesSetKey(
-    			&ctx->cipher.aes, key, key_len, NULL,
-				enc == OPENVPN_OP_ENCRYPT ? AES_ENCRYPTION : AES_DECRYPTION
-			)) != 0) {
-            msg(M_FATAL, "wc_AesSetKey failed with Errno: %d", ret);
+    	if (key) {
+			if ((ret = wc_AesSetKey(
+					&ctx->cipher.aes, key, key_len, iv,
+					enc == OPENVPN_OP_ENCRYPT ? AES_ENCRYPTION : AES_DECRYPTION
+				)) != 0) {
+				msg(M_FATAL, "wc_AesSetKey failed with Errno: %d", ret);
+				return 0;
+			}
     	}
+        if (iv && !key) {
+			if ((ret = wc_AesSetIV(&ctx->cipher.aes, iv))) {
+				msg(M_FATAL, "wc_AesSetIV failed with Errno: %d", ret);
+				return 0;
+			}
+        }
     	break;
     case OV_WC_DES_CBC_TYPE:
     case OV_WC_DES_ECB_TYPE:
-    	if ((ret = wc_Des_SetKey(
-    			&ctx->cipher.des, key, NULL,
-				enc == OPENVPN_OP_ENCRYPT ? DES_ENCRYPTION : DES_DECRYPTION
-			)) != 0) {
-            msg(M_FATAL, "wc_Des_SetKey failed with Errno: %d", ret);
+    	if (key) {
+			if ((ret = wc_Des_SetKey(
+					&ctx->cipher.des, key, iv,
+					enc == OPENVPN_OP_ENCRYPT ? DES_ENCRYPTION : DES_DECRYPTION
+				)) != 0) {
+				msg(M_FATAL, "wc_Des_SetKey failed with Errno: %d", ret);
+				return 0;
+			}
     	}
+        if (iv && !key) {
+			wc_Des_SetIV(&ctx->cipher.des, iv);
+        }
     	break;
     case OV_WC_DES_EDE3_CBC_TYPE:
     case OV_WC_DES_EDE3_ECB_TYPE:
-    	if ((ret = wc_Des3_SetKey(
-    			&ctx->cipher.des3, key, NULL,
-				enc == OPENVPN_OP_ENCRYPT ? DES_ENCRYPTION : DES_DECRYPTION
-			)) != 0) {
-            msg(M_FATAL, "wc_Des3_SetKey failed with Errno: %d", ret);
+    	if (key) {
+			if ((ret = wc_Des3_SetKey(
+					&ctx->cipher.des3, key, iv,
+					enc == OPENVPN_OP_ENCRYPT ? DES_ENCRYPTION : DES_DECRYPTION
+				)) != 0) {
+				msg(M_FATAL, "wc_Des3_SetKey failed with Errno: %d", ret);
+				return 0;
+			}
     	}
+        if (iv && !key) {
+			if ((ret = wc_Des3_SetIV(&ctx->cipher.des3, iv)) != 0) {
+				msg(M_FATAL, "wc_Des3_SetIV failed with Errno: %d", ret);
+				return 0;
+			}
+        }
     	break;
     case OV_WC_CHACHA20_POLY1305_TYPE:
-        if ((ret = wc_Chacha_SetKey(&ctx->cipher.chacha20_poly1305.chacha,
-        					   key, CHACHA20_POLY1305_AEAD_KEYSIZE)) != 0) {
-            msg(M_FATAL, "wc_Des3_SetKey failed with Errno: %d", ret);
+    	if (key) {
+			memcpy(ctx->cipher.chacha20_poly1305.init_poly1305Key, key,
+				   CHACHA20_POLY1305_AEAD_KEYSIZE);
+    	}
+    	if (iv) {
+			if ((ret = wc_Chacha_SetKey(&ctx->cipher.chacha20_poly1305.chacha,
+										ctx->cipher.chacha20_poly1305.init_poly1305Key,
+										CHACHA20_POLY1305_AEAD_KEYSIZE)) != 0) {
+				msg(M_FATAL, "wc_Chacha_SetKey failed with Errno: %d", ret);
+				return 0;
+			}
+        	if ((ret = wc_Chacha_SetIV(&ctx->cipher.chacha20_poly1305.chacha,
+        							   iv, 0)) != 0) {
+                msg(M_FATAL, "wc_Chacha_SetIV failed with Errno: %d", ret);
+            	return 0;
+        	}
+        	if ((ret = wc_Chacha_Process(&ctx->cipher.chacha20_poly1305.chacha,
+        								 ctx->cipher.chacha20_poly1305.tag_poly1305Key,
+										 ctx->cipher.chacha20_poly1305.init_poly1305Key,
+										 CHACHA20_POLY1305_AEAD_KEYSIZE)) != 0) {
+                msg(M_FATAL, "wc_Chacha_Process failed with Errno: %d", ret);
+            	return 0;
+        	}
         }
-        ctx->cipher.chacha20_poly1305.iv_set = false;
-        memcpy(ctx->cipher.chacha20_poly1305.poly1305Key, key,
-        	   CHACHA20_POLY1305_AEAD_KEYSIZE);
     	break;
     case OV_WC_NULL_CIPHER_TYPE:
-    	break;
+    	return 0;
     }
+
 	ctx->cipher_type = *kt;
 	ctx->enc = enc == OPENVPN_OP_ENCRYPT ? OV_WC_ENCRYPT : OV_WC_DECRYPT;
+	return 1;
+}
+
+void cipher_ctx_init(cipher_ctx_t *ctx, const uint8_t *key, int key_len,
+                     const cipher_kt_t *kt, int enc) {
+	int ret;
+    ASSERT(NULL != kt && NULL != ctx && NULL != key);
+
+    check_key_length(*kt, key_len);
+    if ((ret = wolfssl_ctx_init(ctx, key, key_len, NULL, kt, enc)) != 1) {
+        msg(M_FATAL, "wolfssl_ctx_init failed with Errno: %d", ret);
+    }
 }
 
 void cipher_ctx_cleanup(cipher_ctx_t *ctx) {
-	EVP_CIPHER_CTX_cleanup(ctx);
+	if (ctx) {
+		ctx->cipher_type = OV_WC_NULL_CIPHER_TYPE;
+		ctx->enc = -1;
+		memset(&ctx->cipher, 0, sizeof(ctx->cipher));
+	}
 }
 
 int cipher_ctx_iv_length(const cipher_ctx_t *ctx) {
-    return EVP_CIPHER_CTX_iv_length(ctx);
+	return cipher_kt_iv_size(&ctx->cipher_type);
 }
 
 int cipher_ctx_get_tag(cipher_ctx_t *ctx, uint8_t *tag, int tag_len) {
@@ -814,54 +909,27 @@ int cipher_ctx_get_tag(cipher_ctx_t *ctx, uint8_t *tag, int tag_len) {
 }
 
 int cipher_ctx_block_size(const cipher_ctx_t *ctx) {
-    return EVP_CIPHER_CTX_block_size(ctx);
+	return cipher_kt_key_size(&ctx->cipher_type);
 }
 
 int cipher_ctx_mode(const cipher_ctx_t *ctx) {
-    return EVP_CIPHER_CTX_mode(ctx);
+	return cipher_kt_mode(&ctx->cipher_type);
 }
 
 const cipher_kt_t *cipher_ctx_get_cipher_kt(const cipher_ctx_t *ctx) {
-    const struct cipher *ent;
-
-
-    static const struct cipher{
-            unsigned char type;
-            const char *name;
-    } cipher_tbl[] = {
-        {AES_128_CBC_TYPE, "AES-128-CBC"},
-        {AES_192_CBC_TYPE, "AES-192-CBC"},
-        {AES_256_CBC_TYPE, "AES-256-CBC"},
-    	{AES_128_CTR_TYPE, "AES-128-CTR"},
-    	{AES_192_CTR_TYPE, "AES-192-CTR"},
-    	{AES_256_CTR_TYPE, "AES-256-CTR"},
-    	{AES_128_ECB_TYPE, "AES-128-ECB"},
-    	{AES_192_ECB_TYPE, "AES-192-ECB"},
-    	{AES_256_ECB_TYPE, "AES-256-ECB"},
-        {DES_CBC_TYPE, "DES-CBC"},
-        {DES_ECB_TYPE, "DES-ECB"},
-        {DES_EDE3_CBC_TYPE, "DES-EDE3-CBC"},
-        {DES_EDE3_ECB_TYPE, "DES-EDE3-ECB"},
-        {ARC4_TYPE, "ARC4"},
-    #ifdef HAVE_IDEA
-        {IDEA_CBC_TYPE, "IDEA-CBC"},
-    #endif
-        { 0, NULL}
-    };
-
-	if (ctx == NULL)
-		return NULL;
-
-    for (ent = cipher_tbl; ent->name != NULL; ent++) {
-        if (ctx->cipherType == ent->type) {
-            return (EVP_CIPHER *)ent->name;
-        }
-    }
+	if (ctx) {
+		return &ctx->cipher_type;
+	}
 	return NULL;
 }
 
 int cipher_ctx_reset(cipher_ctx_t *ctx, const uint8_t *iv_buf) {
-    return EVP_CipherInit(ctx, NULL, NULL, iv_buf, -1);
+	int ret;
+    if ((ret = wolfssl_ctx_init(ctx, NULL, 0, iv_buf, &ctx->cipher_type, -1)) != 1) {
+        msg(M_FATAL, "wolfssl_ctx_init failed with Errno: %d", ret);
+        return 0;
+    }
+    return 1;
 }
 
 int cipher_ctx_update_ad(cipher_ctx_t *ctx, const uint8_t *src, int src_len) {

@@ -70,7 +70,7 @@
 
 /** Generic cipher key type %context. */
 typedef enum {
-	/** DO NOT CHANGE ORDER OF ELEMENTS */
+	/* DO NOT CHANGE ORDER OF ELEMENTS */
 	OV_WC_AES_128_CBC_TYPE = 0,
 	OV_WC_AES_192_CBC_TYPE,
 	OV_WC_AES_256_CBC_TYPE,
@@ -94,6 +94,7 @@ typedef enum {
 	OV_WC_DES_EDE3_CBC_TYPE,
 	OV_WC_DES_EDE3_ECB_TYPE,
 	OV_WC_CHACHA20_POLY1305_TYPE,
+	/* LEAVE NULL CIPHER AS LAST ELEMENT */
 	OV_WC_NULL_CIPHER_TYPE,
 } cipher_kt_t;
 
@@ -169,8 +170,8 @@ typedef struct {
 	#ifdef HAVE_CHACHA
 	    struct {
 	    	ChaCha chacha;
-	    	bool iv_set;
-	        uint8_t poly1305Key[CHACHA20_POLY1305_AEAD_KEYSIZE];
+	        uint8_t tag_poly1305Key[CHACHA20_POLY1305_AEAD_KEYSIZE];
+	        uint8_t init_poly1305Key[CHACHA20_POLY1305_AEAD_KEYSIZE];
 	    } chacha20_poly1305;
 	#endif
 	} cipher;
