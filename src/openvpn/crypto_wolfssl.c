@@ -945,31 +945,76 @@ int cipher_ctx_update_ad(cipher_ctx_t *ctx, const uint8_t *src, int src_len) {
 static int wolfssl_ctx_update_blocks(cipher_ctx_t *ctx, uint8_t *dst, int *dst_len,
         					  	  	 uint8_t *src, int src_len) {
 #error not implemented
+	int ret;
+	ASSERT((src_len % cipher_kt_block_size(&ctx->cipher_type)) == 0);
 
     switch (ctx->cipher_type) {
     case OV_WC_AES_128_CBC_TYPE:
     case OV_WC_AES_192_CBC_TYPE:
     case OV_WC_AES_256_CBC_TYPE:
+    	if (ctx->enc == OV_WC_ENCRYPT) {
+			if ((ret = wc_AesCbcEncrypt(&ctx->cipher.aes, dst, src, src_len)) != 0) {
+				msg(M_FATAL, "wc_AesCbcEncrypt failed with Errno: %d", ret);
+				return 0;
+			}
+    	} else {
+			if ((ret = wc_AesCbcDecrypt(&ctx->cipher.aes, dst, src, src_len)) != 0) {
+				msg(M_FATAL, "wc_AesCbcDecrypt failed with Errno: %d", ret);
+				return 0;
+			}
+    	}
     	break;
     case OV_WC_AES_128_CTR_TYPE:
     case OV_WC_AES_192_CTR_TYPE:
     case OV_WC_AES_256_CTR_TYPE:
+    	/* encryption and decryption are the same for CTR */
+		if ((ret = wc_AesCtrEncrypt(&ctx->cipher.aes, dst, src, src_len)) != 0) {
+			msg(M_FATAL, "wc_AesCtrEncrypt failed with Errno: %d", ret);
+			return 0;
+		}
     	break;
     case OV_WC_AES_128_ECB_TYPE:
     case OV_WC_AES_192_ECB_TYPE:
     case OV_WC_AES_256_ECB_TYPE:
+		msg(M_FATAL, "ECB not yet implemented");
     	break;
     case OV_WC_AES_128_OFB_TYPE:
     case OV_WC_AES_192_OFB_TYPE:
     case OV_WC_AES_256_OFB_TYPE:
+		msg(M_FATAL, "OFB is needs to be tested");
+    	/* encryption and decryption are the same for OFB */
+    	uint8_t zero_in[AES_BLOCK_SIZE] = {0};
+    	uint8_t out_buf[AES_BLOCK_SIZE];
+    	int i, j;
+    	for (i = 0; i < src_len; i += AES_BLOCK_SIZE) {
+    		if ((ret = wc_AesCfbEncrypt(&ctx->cipher.aes, out_buf, zero_in, AES_BLOCK_SIZE)) != 0) {
+    			msg(M_FATAL, "wc_AesCfbEncrypt failed with Errno: %d", ret);
+    			return 0;
+    		}
+    		for (j = 0; j < AES_BLOCK_SIZE; j++) {
+    			dst[i + j] = out_buf[j] ^ src[i + j];
+    		}
+    	}
     	break;
     case OV_WC_AES_128_CFB_TYPE:
     case OV_WC_AES_192_CFB_TYPE:
     case OV_WC_AES_256_CFB_TYPE:
+    	if (ctx->enc == OV_WC_ENCRYPT) {
+			if ((ret = wc_AesCfbEncrypt(&ctx->cipher.aes, dst, src, src_len)) != 0) {
+				msg(M_FATAL, "wc_AesCfbEncrypt failed with Errno: %d", ret);
+				return 0;
+			}
+    	} else {
+			if ((ret = wc_AesCfbDecrypt(&ctx->cipher.aes, dst, src, src_len)) != 0) {
+				msg(M_FATAL, "wc_AesCfbDecrypt failed with Errno: %d", ret);
+				return 0;
+			}
+    	}
     	break;
     case OV_WC_AES_128_GCM_TYPE:
     case OV_WC_AES_192_GCM_TYPE:
     case OV_WC_AES_256_GCM_TYPE:
+		msg(M_FATAL, "AEAD NOT IMPLEMENTED YET");
     	break;
     case OV_WC_DES_CBC_TYPE:
     case OV_WC_DES_ECB_TYPE:
@@ -978,10 +1023,12 @@ static int wolfssl_ctx_update_blocks(cipher_ctx_t *ctx, uint8_t *dst, int *dst_l
     case OV_WC_DES_EDE3_ECB_TYPE:
     	break;
     case OV_WC_CHACHA20_POLY1305_TYPE:
+		msg(M_FATAL, "AEAD NOT IMPLEMENTED YET");
     	break;
     case OV_WC_NULL_CIPHER_TYPE:
     	return 0;
     }
+	*dst_len += src_len;
 
 }
 
