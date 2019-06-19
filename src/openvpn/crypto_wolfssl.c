@@ -944,7 +944,6 @@ int cipher_ctx_update_ad(cipher_ctx_t *ctx, const uint8_t *src, int src_len) {
 
 static int wolfssl_ctx_update_blocks(cipher_ctx_t *ctx, uint8_t *dst, int *dst_len,
         					  	  	 uint8_t *src, int src_len) {
-#error not implemented
 	int ret;
 	ASSERT((src_len % cipher_kt_block_size(&ctx->cipher_type)) == 0);
 
@@ -1017,10 +1016,34 @@ static int wolfssl_ctx_update_blocks(cipher_ctx_t *ctx, uint8_t *dst, int *dst_l
 		msg(M_FATAL, "AEAD NOT IMPLEMENTED YET");
     	break;
     case OV_WC_DES_CBC_TYPE:
-    case OV_WC_DES_ECB_TYPE:
+    	if (ctx->enc == OV_WC_ENCRYPT) {
+			if ((ret = wc_Des_CbcEncrypt(&ctx->cipher.des, dst, src, src_len)) != 0) {
+				msg(M_FATAL, "wc_Des3_CbcEncrypt failed with Errno: %d", ret);
+				return 0;
+			}
+    	} else {
+			if ((ret = wc_Des_CbcDecrypt(&ctx->cipher.des, dst, src, src_len)) != 0) {
+				msg(M_FATAL, "wc_Des3_CbcDecrypt failed with Errno: %d", ret);
+				return 0;
+			}
+    	}
     	break;
     case OV_WC_DES_EDE3_CBC_TYPE:
+    	if (ctx->enc == OV_WC_ENCRYPT) {
+			if ((ret = wc_Des3_CbcEncrypt(&ctx->cipher.des3, dst, src, src_len)) != 0) {
+				msg(M_FATAL, "wc_Des3_CbcEncrypt failed with Errno: %d", ret);
+				return 0;
+			}
+    	} else {
+			if ((ret = wc_Des3_CbcDecrypt(&ctx->cipher.des3, dst, src, src_len)) != 0) {
+				msg(M_FATAL, "wc_Des3_CbcDecrypt failed with Errno: %d", ret);
+				return 0;
+			}
+    	}
+    	break;
+    case OV_WC_DES_ECB_TYPE:
     case OV_WC_DES_EDE3_ECB_TYPE:
+		msg(M_FATAL, "ECB not yet implemented");
     	break;
     case OV_WC_CHACHA20_POLY1305_TYPE:
 		msg(M_FATAL, "AEAD NOT IMPLEMENTED YET");
@@ -1029,13 +1052,11 @@ static int wolfssl_ctx_update_blocks(cipher_ctx_t *ctx, uint8_t *dst, int *dst_l
     	return 0;
     }
 	*dst_len += src_len;
-
+	return 1;
 }
 
 static int wolfssl_ctx_update(cipher_ctx_t *ctx, uint8_t *dst, int *dst_len,
         					  uint8_t *src, int src_len) {
-#error not implemented
-
 	int ret;
 	int block_size = cipher_kt_block_size(&ctx->cipher_type);
 	int block_leftover;
