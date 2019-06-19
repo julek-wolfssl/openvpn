@@ -591,7 +591,7 @@ int cipher_kt_block_size(const cipher_kt_t *cipher_kt) {
     case OV_WC_DES_EDE3_ECB_TYPE:
     	return DES_BLOCK_SIZE;
     case OV_WC_CHACHA20_POLY1305_TYPE:
-    	return CHACHA_CHUNK_WORDS;
+    	return CHACHA_CHUNK_BYTES;
     case OV_WC_NULL_CIPHER_TYPE:
     	return 0;
     }
@@ -768,8 +768,8 @@ static void check_key_length(const cipher_kt_t kt, int key_len) {
 	msg(M_FATAL, "Invalid cipher.");
 }
 
-int wolfssl_ctx_init(cipher_ctx_t *ctx, const uint8_t *key, int key_len, const uint8_t* iv,
-					 const cipher_kt_t *kt, int enc) {
+static int wolfssl_ctx_init(cipher_ctx_t *ctx, const uint8_t *key, int key_len, const uint8_t* iv,
+							const cipher_kt_t *kt, int enc) {
 	int ret;
 
     switch (*kt) {
@@ -873,6 +873,7 @@ int wolfssl_ctx_init(cipher_ctx_t *ctx, const uint8_t *key, int key_len, const u
 
 	ctx->cipher_type = *kt;
 	ctx->enc = enc == OPENVPN_OP_ENCRYPT ? OV_WC_ENCRYPT : OV_WC_DECRYPT;
+	ctx->buf_used = 0;
 	return 1;
 }
 
@@ -941,10 +942,114 @@ int cipher_ctx_update_ad(cipher_ctx_t *ctx, const uint8_t *src, int src_len) {
     return 0;
 }
 
+static int wolfssl_ctx_update_blocks(cipher_ctx_t *ctx, uint8_t *dst, int *dst_len,
+        					  	  	 uint8_t *src, int src_len) {
+#error not implemented
+
+    switch (ctx->cipher_type) {
+    case OV_WC_AES_128_CBC_TYPE:
+    case OV_WC_AES_192_CBC_TYPE:
+    case OV_WC_AES_256_CBC_TYPE:
+    	break;
+    case OV_WC_AES_128_CTR_TYPE:
+    case OV_WC_AES_192_CTR_TYPE:
+    case OV_WC_AES_256_CTR_TYPE:
+    	break;
+    case OV_WC_AES_128_ECB_TYPE:
+    case OV_WC_AES_192_ECB_TYPE:
+    case OV_WC_AES_256_ECB_TYPE:
+    	break;
+    case OV_WC_AES_128_OFB_TYPE:
+    case OV_WC_AES_192_OFB_TYPE:
+    case OV_WC_AES_256_OFB_TYPE:
+    	break;
+    case OV_WC_AES_128_CFB_TYPE:
+    case OV_WC_AES_192_CFB_TYPE:
+    case OV_WC_AES_256_CFB_TYPE:
+    	break;
+    case OV_WC_AES_128_GCM_TYPE:
+    case OV_WC_AES_192_GCM_TYPE:
+    case OV_WC_AES_256_GCM_TYPE:
+    	break;
+    case OV_WC_DES_CBC_TYPE:
+    case OV_WC_DES_ECB_TYPE:
+    	break;
+    case OV_WC_DES_EDE3_CBC_TYPE:
+    case OV_WC_DES_EDE3_ECB_TYPE:
+    	break;
+    case OV_WC_CHACHA20_POLY1305_TYPE:
+    	break;
+    case OV_WC_NULL_CIPHER_TYPE:
+    	return 0;
+    }
+
+}
+
+static int wolfssl_ctx_update(cipher_ctx_t *ctx, uint8_t *dst, int *dst_len,
+        					  uint8_t *src, int src_len) {
+#error not implemented
+
+	int ret;
+	int block_size = cipher_kt_block_size(&ctx->cipher_type);
+	int block_leftover;
+
+    if ((ctx == NULL) ||
+		(src == NULL) || (src_len < 0) ||
+        (dst_len == NULL)|| (dst)) return 0;
+
+    *dst_len = 0;
+    if (!src_len) {
+    	/* nothing to do */
+    	return 1;
+    }
+
+	if (ctx->buf_used) {
+		if ((ctx->buf_used + src_len) < block_size) {
+			memcpy((&ctx->buf) + ctx->buf_used, src, src_len);
+			ctx->buf_used += src_len;
+			return 1;
+		} else {
+			memcpy((&ctx->buf) + ctx->buf_used, src, block_size - ctx->buf_used);
+			src += block_size - ctx->buf_used;
+			src_len -= block_size - ctx->buf_used;
+			if ((ret = wolfssl_ctx_update_blocks(ctx, dst, dst_len,
+												 (uint8_t*)&(ctx->buf), block_size) != 1)) {
+		        msg(M_FATAL, "%s: wolfssl_ctx_update_blocks() failed", __func__);
+		    	return 0;
+			}
+			ctx->buf_used = 0;
+			dst += block_size;
+			*dst_len += block_size;
+		}
+	}
+
+	if (src_len < block_size) {
+		memcpy(&ctx->buf, src, src_len);
+		ctx->buf_used += src_len;
+		return 1;
+	}
+
+	ASSERT(ctx->buf_used == 0);
+
+	block_leftover = src_len % block_size;
+	if ((ret = wolfssl_ctx_update_blocks(ctx, dst, dst_len,
+										 src, src_len - block_leftover) != 1)) {
+        msg(M_FATAL, "%s: wolfssl_ctx_update_blocks() failed", __func__);
+    	return 0;
+	}
+
+	if (block_leftover) {
+		memcpy(&ctx->buf, src + (src_len - block_leftover), block_leftover);
+		ctx->buf_used = block_leftover;
+	}
+
+	return 1;
+}
+
 int cipher_ctx_update(cipher_ctx_t *ctx, uint8_t *dst, int *dst_len,
                       uint8_t *src, int src_len) {
-    if (!EVP_CipherUpdate(ctx, dst, dst_len, src, src_len)) {
-        msg(M_FATAL, "%s: EVP_CipherUpdate() failed", __func__);
+    if (!wolfssl_ctx_update(ctx, dst, dst_len, src, src_len)) {
+        msg(M_FATAL, "%s: wolfssl_ctx_update() failed", __func__);
     }
     return 1;
 }

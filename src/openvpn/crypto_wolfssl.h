@@ -180,6 +180,14 @@ typedef struct {
 		OV_WC_ENCRYPT,
 		OV_WC_DECRYPT,
 	} enc;
+	union {
+		uint8_t aes[AES_BLOCK_SIZE];
+		uint8_t des[DES_BLOCK_SIZE];
+	#ifdef HAVE_CHACHA
+		uint8_t chacha[CHACHA_CHUNK_BYTES];
+	#endif
+	} buf;
+	int buf_used;
 } cipher_ctx_t;
 
 /** Generic message digest key type %context. */
