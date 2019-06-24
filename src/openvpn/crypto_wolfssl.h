@@ -30,11 +30,13 @@
 #define CRYPTO_WOLFSSL_H_
 
 #define WOLFSSL_DES_ECB
+#define WOLFSSL_DER_TO_PEM
 
 #include <wolfssl/options.h>
 #include <wolfssl/wolfcrypt/logging.h>
 #include <wolfssl/wolfcrypt/wc_port.h>
 #include <wolfssl/wolfcrypt/coding.h>
+#include <wolfssl/wolfcrypt/types.h>
 #include <wolfssl/ssl.h>
 
 // Digests
@@ -56,7 +58,6 @@
 #include <wolfssl/wolfcrypt/hmac.h>
 #include <wolfssl/wolfcrypt/random.h>
 
-#define NO_INLINE
 #include <wolfssl/wolfcrypt/misc.h>
 
 #include <stdbool.h>
@@ -70,85 +71,85 @@
 
 /** Generic cipher key type %context. */
 typedef enum {
-	/* DO NOT CHANGE ORDER OF ELEMENTS */
-	OV_WC_AES_128_CBC_TYPE = 0,
-	OV_WC_AES_192_CBC_TYPE,
-	OV_WC_AES_256_CBC_TYPE,
-	OV_WC_AES_128_CTR_TYPE,
-	OV_WC_AES_192_CTR_TYPE,
-	OV_WC_AES_256_CTR_TYPE,
-	OV_WC_AES_128_ECB_TYPE,
-	OV_WC_AES_192_ECB_TYPE,
-	OV_WC_AES_256_ECB_TYPE,
-	OV_WC_AES_128_OFB_TYPE,
-	OV_WC_AES_192_OFB_TYPE,
-	OV_WC_AES_256_OFB_TYPE,
-	OV_WC_AES_128_CFB_TYPE,
-	OV_WC_AES_192_CFB_TYPE,
-	OV_WC_AES_256_CFB_TYPE,
-	OV_WC_AES_128_GCM_TYPE,
-	OV_WC_AES_192_GCM_TYPE,
-	OV_WC_AES_256_GCM_TYPE,
-	OV_WC_DES_CBC_TYPE,
-	OV_WC_DES_ECB_TYPE,
-	OV_WC_DES_EDE3_CBC_TYPE,
-	OV_WC_DES_EDE3_ECB_TYPE,
-	OV_WC_CHACHA20_POLY1305_TYPE,
-	/* LEAVE NULL CIPHER AS LAST ELEMENT */
-	OV_WC_NULL_CIPHER_TYPE,
+    /* DO NOT CHANGE ORDER OF ELEMENTS */
+    OV_WC_AES_128_CBC_TYPE = 0,
+    OV_WC_AES_192_CBC_TYPE,
+    OV_WC_AES_256_CBC_TYPE,
+    OV_WC_AES_128_CTR_TYPE,
+    OV_WC_AES_192_CTR_TYPE,
+    OV_WC_AES_256_CTR_TYPE,
+    OV_WC_AES_128_ECB_TYPE,
+    OV_WC_AES_192_ECB_TYPE,
+    OV_WC_AES_256_ECB_TYPE,
+    OV_WC_AES_128_OFB_TYPE,
+    OV_WC_AES_192_OFB_TYPE,
+    OV_WC_AES_256_OFB_TYPE,
+    OV_WC_AES_128_CFB_TYPE,
+    OV_WC_AES_192_CFB_TYPE,
+    OV_WC_AES_256_CFB_TYPE,
+    OV_WC_AES_128_GCM_TYPE,
+    OV_WC_AES_192_GCM_TYPE,
+    OV_WC_AES_256_GCM_TYPE,
+    OV_WC_DES_CBC_TYPE,
+    OV_WC_DES_ECB_TYPE,
+    OV_WC_DES_EDE3_CBC_TYPE,
+    OV_WC_DES_EDE3_ECB_TYPE,
+    OV_WC_CHACHA20_POLY1305_TYPE,
+    /* LEAVE NULL CIPHER AS LAST ELEMENT */
+    OV_WC_NULL_CIPHER_TYPE,
 } cipher_kt_t;
 
 /* Make sure the order is the same as in cipher_kt_t */
-const cipher_kt_t cipher_static[] = {
-	OV_WC_AES_128_CBC_TYPE,
-	OV_WC_AES_192_CBC_TYPE,
-	OV_WC_AES_256_CBC_TYPE,
-	OV_WC_AES_128_CTR_TYPE,
-	OV_WC_AES_192_CTR_TYPE,
-	OV_WC_AES_256_CTR_TYPE,
-	OV_WC_AES_128_ECB_TYPE,
-	OV_WC_AES_192_ECB_TYPE,
-	OV_WC_AES_256_ECB_TYPE,
-	OV_WC_AES_128_OFB_TYPE,
-	OV_WC_AES_192_OFB_TYPE,
-	OV_WC_AES_256_OFB_TYPE,
-	OV_WC_AES_128_CFB_TYPE,
-	OV_WC_AES_192_CFB_TYPE,
-	OV_WC_AES_256_CFB_TYPE,
-	OV_WC_AES_128_GCM_TYPE,
-	OV_WC_AES_192_GCM_TYPE,
-	OV_WC_AES_256_GCM_TYPE,
-	OV_WC_DES_CBC_TYPE,
-	OV_WC_DES_ECB_TYPE,
-	OV_WC_DES_EDE3_CBC_TYPE,
-	OV_WC_DES_EDE3_ECB_TYPE,
-	OV_WC_CHACHA20_POLY1305_TYPE,
-	OV_WC_NULL_CIPHER_TYPE,
+const static cipher_kt_t cipher_static[] = {
+    OV_WC_AES_128_CBC_TYPE,
+    OV_WC_AES_192_CBC_TYPE,
+    OV_WC_AES_256_CBC_TYPE,
+    OV_WC_AES_128_CTR_TYPE,
+    OV_WC_AES_192_CTR_TYPE,
+    OV_WC_AES_256_CTR_TYPE,
+    OV_WC_AES_128_ECB_TYPE,
+    OV_WC_AES_192_ECB_TYPE,
+    OV_WC_AES_256_ECB_TYPE,
+    OV_WC_AES_128_OFB_TYPE,
+    OV_WC_AES_192_OFB_TYPE,
+    OV_WC_AES_256_OFB_TYPE,
+    OV_WC_AES_128_CFB_TYPE,
+    OV_WC_AES_192_CFB_TYPE,
+    OV_WC_AES_256_CFB_TYPE,
+    OV_WC_AES_128_GCM_TYPE,
+    OV_WC_AES_192_GCM_TYPE,
+    OV_WC_AES_256_GCM_TYPE,
+    OV_WC_DES_CBC_TYPE,
+    OV_WC_DES_ECB_TYPE,
+    OV_WC_DES_EDE3_CBC_TYPE,
+    OV_WC_DES_EDE3_ECB_TYPE,
+    OV_WC_CHACHA20_POLY1305_TYPE,
+    OV_WC_NULL_CIPHER_TYPE,
 };
 
-const struct cipher{
-		cipher_kt_t type;
+const static struct cipher{
+        cipher_kt_t type;
         const char *name;
 } cipher_tbl[] = {
-	/* Make sure the order is the same as in cipher_kt_t */
+    /* Make sure the order is the same as in cipher_kt_t */
     {OV_WC_AES_128_CBC_TYPE, "AES-128-CBC"},
     {OV_WC_AES_192_CBC_TYPE, "AES-192-CBC"},
     {OV_WC_AES_256_CBC_TYPE, "AES-256-CBC"},
-	{OV_WC_AES_128_CTR_TYPE, "AES-128-CTR"},
-	{OV_WC_AES_192_CTR_TYPE, "AES-192-CTR"},
-	{OV_WC_AES_256_CTR_TYPE, "AES-256-CTR"},
-	{OV_WC_AES_128_ECB_TYPE, "AES-128-ECB"},
-	{OV_WC_AES_192_ECB_TYPE, "AES-192-ECB"},
-	{OV_WC_AES_256_ECB_TYPE, "AES-256-ECB"},
-	{OV_WC_AES_128_OFB_TYPE,"AES-128-OFB"},
-	{OV_WC_AES_192_OFB_TYPE,"AES-192-OFB"},
-	{OV_WC_AES_256_OFB_TYPE,"AES-256-OFB"},
-	{OV_WC_AES_128_CFB_TYPE,"AES-128-CFB"},
-	{OV_WC_AES_192_CFB_TYPE,"AES-192-CFB"},
-	{OV_WC_AES_256_CFB_TYPE,"AES-256-CFB"},
-	{OV_WC_AES_128_GCM_TYPE,"AES-128-GCM"},
-	{OV_WC_AES_192_GCM_TYPE,"AES-192-GCM"},
-	{OV_WC_AES_256_GCM_TYPE,"AES-256-GCM"},
+    {OV_WC_AES_128_CTR_TYPE, "AES-128-CTR"},
+    {OV_WC_AES_192_CTR_TYPE, "AES-192-CTR"},
+    {OV_WC_AES_256_CTR_TYPE, "AES-256-CTR"},
+    {OV_WC_AES_128_ECB_TYPE, "AES-128-ECB"},
+    {OV_WC_AES_192_ECB_TYPE, "AES-192-ECB"},
+    {OV_WC_AES_256_ECB_TYPE, "AES-256-ECB"},
+    {OV_WC_AES_128_OFB_TYPE,"AES-128-OFB"},
+    {OV_WC_AES_192_OFB_TYPE,"AES-192-OFB"},
+    {OV_WC_AES_256_OFB_TYPE,"AES-256-OFB"},
+    {OV_WC_AES_128_CFB_TYPE,"AES-128-CFB"},
+    {OV_WC_AES_192_CFB_TYPE,"AES-192-CFB"},
+    {OV_WC_AES_256_CFB_TYPE,"AES-256-CFB"},
+    {OV_WC_AES_128_GCM_TYPE,"AES-128-GCM"},
+    {OV_WC_AES_192_GCM_TYPE,"AES-192-GCM"},
+    {OV_WC_AES_256_GCM_TYPE,"AES-256-GCM"},
     {OV_WC_DES_CBC_TYPE, "DES-CBC"},
     {OV_WC_DES_ECB_TYPE, "DES-ECB"},
     {OV_WC_DES_EDE3_CBC_TYPE, "DES-EDE3-CBC"},
@@ -159,90 +160,160 @@ const struct cipher{
 
 /** Generic cipher %context. */
 typedef struct {
-	union {
-	#ifndef NO_AES
-	    Aes  aes;
-	#endif
-	#ifndef NO_DES3
-	    Des  des;
-	    Des3 des3;
-	#endif
-	#ifdef HAVE_CHACHA
-	    struct {
-	    	ChaCha chacha;
-	        uint8_t tag_poly1305Key[CHACHA20_POLY1305_AEAD_KEYSIZE];
-	        uint8_t init_poly1305Key[CHACHA20_POLY1305_AEAD_KEYSIZE];
-	    } chacha20_poly1305;
-	#endif
-	} cipher;
-	cipher_kt_t cipher_type;
-	enum {
-		OV_WC_ENCRYPT,
-		OV_WC_DECRYPT,
-	} enc;
-	union {
-		uint8_t aes[AES_BLOCK_SIZE];
-		uint8_t des[DES_BLOCK_SIZE];
-	#ifdef HAVE_CHACHA
-		uint8_t chacha[CHACHA_CHUNK_BYTES];
-	#endif
-	} buf;
-	int buf_used;
+    union {
+    #ifndef NO_AES
+        Aes  aes;
+    #endif
+    #ifndef NO_DES3
+        Des  des;
+        Des3 des3;
+    #endif
+    #ifdef HAVE_CHACHA
+        struct {
+            ChaCha chacha;
+            uint8_t tag_poly1305Key[CHACHA20_POLY1305_AEAD_KEYSIZE];
+            uint8_t init_poly1305Key[CHACHA20_POLY1305_AEAD_KEYSIZE];
+        } chacha20_poly1305;
+    #endif
+    } cipher;
+    cipher_kt_t cipher_type;
+    enum {
+        OV_WC_ENCRYPT,
+        OV_WC_DECRYPT,
+    } enc;
+    union {
+        uint8_t aes[AES_BLOCK_SIZE];
+        uint8_t des[DES_BLOCK_SIZE];
+    #ifdef HAVE_CHACHA
+        uint8_t chacha[CHACHA_CHUNK_BYTES];
+    #endif
+    } buf;
+    int buf_used;
 } cipher_ctx_t;
 
 /** Generic message digest key type %context. */
 typedef enum {
-	OV_WC_MD4,
-	OV_WC_MD5,
-	OV_WC_SHA,
-	OV_WC_SHA224,
-	OV_WC_SHA384,
-	OV_WC_SHA512,
-	OV_WC_SHA3,
-	OV_WC_RIPEMD,
+    /* DO NOT CHANGE ORDER OF ELEMENTS */
+    OV_WC_MD4 = 0,
+    OV_WC_MD5,
+    OV_WC_SHA,
+    OV_WC_SHA224,
+    OV_WC_SHA256,
+    OV_WC_SHA384,
+    OV_WC_SHA512,
+    OV_WC_SHA3_224,
+    OV_WC_SHA3_256,
+    OV_WC_SHA3_384,
+    OV_WC_SHA3_512,
+    /* LEAVE NULL DIGEST AS LAST ELEMENT */
+    OV_WC_NULL_DIGEST,
 } md_kt_t;
+
+static const enum wc_HashType OV_to_WC_hash_type[] = {
+    /* Make sure the order is the same as in md_kt_t */
+    WC_HASH_TYPE_MD4,
+    WC_HASH_TYPE_MD5,
+    WC_HASH_TYPE_SHA,
+    WC_HASH_TYPE_SHA224,
+    WC_HASH_TYPE_SHA256,
+    WC_HASH_TYPE_SHA384,
+    WC_HASH_TYPE_SHA512,
+    WC_HASH_TYPE_SHA3_224,
+    WC_HASH_TYPE_SHA3_256,
+    WC_HASH_TYPE_SHA3_384,
+    WC_HASH_TYPE_SHA3_512,
+};
+
+static const md_kt_t digest_static[] = {
+    /* Make sure the order is the same as in md_kt_t */
+    OV_WC_MD4,
+    OV_WC_MD5,
+    OV_WC_SHA,
+    OV_WC_SHA224,
+    OV_WC_SHA256,
+    OV_WC_SHA384,
+    OV_WC_SHA512,
+    OV_WC_SHA3_224,
+    OV_WC_SHA3_256,
+    OV_WC_SHA3_384,
+    OV_WC_SHA3_512,
+};
+
+static const struct digest{
+    md_kt_t type;
+    const char *name;
+} digest_tbl[] = {
+    /* Make sure the order is the same as in md_kt_t */
+    {OV_WC_MD4, "MD4"},
+    {OV_WC_MD5, "MD5"},
+    {OV_WC_SHA, "SHA"},
+    {OV_WC_SHA224, "SHA224"},
+    {OV_WC_SHA256, "SHA256"},
+    {OV_WC_SHA384, "SHA384"},
+    {OV_WC_SHA512, "SHA512"},
+    {OV_WC_SHA3_224, "SHA3-224"},
+    {OV_WC_SHA3_256, "SHA3-256"},
+    {OV_WC_SHA3_384, "SHA3-384"},
+    {OV_WC_SHA3_512, "SHA3-512"},
+    { 0, NULL}
+};
 
 /** Generic message digest %context. */
 typedef struct {
-	union {
-	#ifndef NO_MD4
-		Md4    md4;
-	#endif
-	#ifndef NO_MD5
-		Md5    md5;
-	#endif
-	wc_Sha    sha;
-	#ifdef WOLFSSL_SHA224
-		wc_Sha224 sha224;
-	#endif
-	wc_Sha256 sha256;
-	#ifdef WOLFSSL_SHA384
-		wc_Sha384 sha384;
-	#endif
-	#ifdef WOLFSSL_SHA512
-		wc_Sha512 sha512;
-	#endif
-	#ifdef WOLFSSL_RIPEMD
-		RipeMd ripemd;
-	#endif
-	#ifdef WOLFSSL_SHA3
-		wc_Sha3 sha3;
-	#endif
-	} hash;
-	md_kt_t hash_type;
+    wc_HashAlg hash;
+    md_kt_t hash_type;
 } md_ctx_t;
 
+
 /** Generic HMAC %context. */
-typedef Hmac hmac_ctx_t;
+typedef struct {
+    Hmac hmac;
+    union {
+    #ifndef NO_MD4
+        uint8_t md4[MD4_DIGEST_SIZE];
+    #endif
+    #ifndef NO_MD5
+        uint8_t md5[WC_MD5_DIGEST_SIZE];
+    #endif
+    #ifndef NO_SHA
+        uint8_t sha[WC_SHA_DIGEST_SIZE];
+    #endif
+    #ifdef WOLFSSL_SHA224
+        uint8_t sha224[WC_SHA224_DIGEST_SIZE];
+    #endif
+    #ifndef NO_SHA256
+        uint8_t sha256[WC_SHA256_DIGEST_SIZE];
+    #endif
+    #ifdef WOLFSSL_SHA384
+        uint8_t sha384[WC_SHA384_DIGEST_SIZE];
+    #endif
+    #ifdef WOLFSSL_SHA512
+        uint8_t sha512[WC_SHA512_DIGEST_SIZE];
+    #endif
+    #if defined(WOLFSSL_SHA3) && !defined(WOLFSSL_NOSHA3_224)
+        uint8_t sha3_224[WC_SHA3_224_DIGEST_SIZE];
+    #endif
+    #if defined(WOLFSSL_SHA3) && !defined(WOLFSSL_NOSHA3_256)
+        uint8_t sha3_256[WC_SHA3_256_DIGEST_SIZE];
+    #endif
+    #if defined(WOLFSSL_SHA3) && !defined(WOLFSSL_NOSHA3_384)
+        uint8_t sha3_384[WC_SHA3_384_DIGEST_SIZE];
+    #endif
+    #if defined(WOLFSSL_SHA3) && !defined(WOLFSSL_NOSHA3_512)
+        uint8_t sha3_512[WC_SHA3_512_DIGEST_SIZE];
+    #endif
+    } key;
+    int key_len;
+} hmac_ctx_t;
 
 /** Maximum length of an IV */
 #define OPENVPN_MAX_IV_LENGTH   16
 
 typedef enum {
-	OPENVPN_MODE_CBC,
-	OPENVPN_MODE_CFB,
-	OPENVPN_MODE_OFB, // this needs to be implemented using CBC with a stream of 0's
-	OPENVPN_MODE_GCM,
+    OPENVPN_MODE_CBC,
+    OPENVPN_MODE_CFB,
+    OPENVPN_MODE_OFB, // this needs to be implemented using CBC with a stream of 0's
+    OPENVPN_MODE_GCM,
 } cipher_modes;
 
 #define DES_KEY_LENGTH 8
@@ -258,7 +329,12 @@ typedef enum {
 /* Set if variable length cipher */
 #define EVP_CIPH_VARIABLE_LENGTH 0x8
 
-extern bool cipher_kt_var_key_size(const cipher_kt_t *cipher);
+static inline bool
+cipher_kt_var_key_size(const cipher_kt_t *cipher)
+{
+    return false;
+}
+
 
 #define CIPHER_LIST_SIZE 1000
 
