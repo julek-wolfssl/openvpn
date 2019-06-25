@@ -42,12 +42,17 @@
 #include "crypto.h"
 #include "crypto_backend.h"
 
+/*
+ *
+ * Functions related to the core crypto library
+ *
+ */
+
 void crypto_init_lib(void) {
     int ret;
 
     if ((ret = wolfCrypt_Init()) != 0) {
         msg(D_CRYPT_ERRORS, "wolfCrypt_Init failed");
-        printf("wolfCrypt_Init failed %d\n", ret);
     }
 }
 
@@ -55,7 +60,6 @@ void crypto_uninit_lib(void) {
     int ret;
     if ((ret = wolfCrypt_Cleanup()) != 0) {
         msg(D_CRYPT_ERRORS, "wolfCrypt_Cleanup failed");
-        printf("wolfCrypt_Cleanup failed %d\n", ret);
     }
 }
 
@@ -66,41 +70,45 @@ void crypto_init_lib_engine(const char *engine_name) {
 }
 
 void show_available_ciphers(void) {
-    static char ciphers[4096];
-    char* x;
-
-    int ret = wolfSSL_get_ciphers(ciphers, (int)sizeof(ciphers));
-
-    for (x = ciphers; *x != '\0'; x++) {
-        if (*x == ':')
-            *x = '\n';
+    cipher_kt_t cipher;
+    for (cipher = 0; cipher < OV_WC_NULL_CIPHER_TYPE; cipher++) {
+        print_cipher(&cipher);
     }
-
-    if (ret == WOLFSSL_SUCCESS)
-        printf("%s\n", ciphers);
 }
 
 void show_available_digests(void) {
-    #ifdef WOLFSSL_MD2
-        printf("MD2 128 bit digest size\n")
-    #endif
     #ifndef NO_MD4
-        printf("MD4 128 bit digest size\n");
+        printf("MD4 %d bit digest size\n", wc_HashGetDigestSize(WC_HASH_TYPE_MD4));
     #endif
     #ifndef NO_MD5
-        printf("MD5 128 bit digest size\n");
+        printf("MD5 %d bit digest size\n", wc_HashGetDigestSize(WC_HASH_TYPE_MD5));
     #endif
     #ifndef NO_SHA
-        printf("SHA1 160 bit digest size\n");
+        printf("SHA1 %d bit digest size\n", wc_HashGetDigestSize(WC_HASH_TYPE_SHA));
+    #endif
+    #ifdef WOLFSSL_SHA224
+        printf("SHA224 %d bit digest size\n", wc_HashGetDigestSize(WC_HASH_TYPE_SHA224));
     #endif
     #ifndef NO_SHA256
-        printf("SHA256 256 bit digest size\n");
+        printf("SHA256 %d bit digest size\n", wc_HashGetDigestSize(WC_HASH_TYPE_SHA256));
     #endif
     #ifdef WOLFSSL_SHA384
-        printf("SHA384 384 bit digest size\n");
+        printf("SHA384 %d bit digest size\n", wc_HashGetDigestSize(WC_HASH_TYPE_SHA384));
     #endif
     #ifdef WOLFSSL_SHA512
-        printf("SHA512 512 bit digest size\n");
+        printf("SHA512 %d bit digest size\n", wc_HashGetDigestSize(WC_HASH_TYPE_SHA512));
+    #endif
+    #if defined(WOLFSSL_SHA3) && !defined(WOLFSSL_NOSHA3_224)
+        printf("SHA3-224 %d bit digest size\n", wc_HashGetDigestSize(WC_HASH_TYPE_SHA3_224));
+    #endif
+    #if defined(WOLFSSL_SHA3) && !defined(WOLFSSL_NOSHA3_256)
+        printf("SHA3-256 %d bit digest size\n", wc_HashGetDigestSize(WC_HASH_TYPE_SHA3_256));
+    #endif
+    #if defined(WOLFSSL_SHA3) && !defined(WOLFSSL_NOSHA3_384)
+        printf("SHA3-384 %d bit digest size\n", wc_HashGetDigestSize(WC_HASH_TYPE_SHA3_384));
+    #endif
+    #if defined(WOLFSSL_SHA3) && !defined(WOLFSSL_NOSHA3_512)
+        printf("SHA3-512 %d bit digest size\n", wc_HashGetDigestSize(WC_HASH_TYPE_SHA3_512));
     #endif
 }
 
@@ -108,6 +116,14 @@ void show_available_engines(void) {
     msg(M_INFO, "Note: wolfSSL does not have an engine");
 }
 
+const cipher_name_pair cipher_name_translation_table[] = {
+    { "AES-128-GCM", "AES-128-GCM" },
+    { "AES-192-GCM", "AES-192-GCM" },
+    { "AES-256-GCM", "AES-256-GCM" },
+    { "CHACHA20-POLY1305", "CHACHA20-POLY1305" },
+};
+const size_t cipher_name_translation_table_count =
+    sizeof(cipher_name_translation_table) / sizeof(*cipher_name_translation_table);
 
 #define PEM_BEGIN              "-----BEGIN "
 #define PEM_BEGIN_LEN          11
@@ -116,6 +132,9 @@ void show_available_engines(void) {
 #define PEM_END                "-----END "
 #define PEM_END_LEN            9
 
+/*
+ * This function calculates the length of the resulting base64 encoded string
+ */
 uint32_t der_to_pem_len(uint32_t der_len) {
     uint32_t pem_len;
     pem_len = (der_len + 2) / 3 * 4;
@@ -125,9 +144,9 @@ uint32_t der_to_pem_len(uint32_t der_len) {
 
 bool crypto_pem_encode(const char *name, struct buffer *dst,
                        const struct buffer *src, struct gc_arena *gc) {
-    uint8_t* pem_buf;
+    uint8_t* pem_buf = NULL;
     uint32_t pem_len = der_to_pem_len(BLEN(src));
-    uint8_t* out_buf;
+    uint8_t* out_buf = NULL;
     uint8_t* out_buf_ptr;
     bool ret = false;
     int err;
@@ -140,12 +159,12 @@ bool crypto_pem_encode(const char *name, struct buffer *dst,
     }
 
     if (!(out_buf = (uint8_t*) malloc(out_len))) {
-        goto out_buf_err;
+        goto cleanup;
     }
 
     if ((err = Base64_Encode(BPTR(src), BLEN(src), pem_buf, &pem_len)) != 0) {
         msg(M_INFO, "Base64_Encode failed with Errno: %d", err);
-        goto Base64_Encode_err;
+        goto cleanup;
     }
 
     out_buf_ptr = out_buf;
@@ -169,14 +188,20 @@ bool crypto_pem_encode(const char *name, struct buffer *dst,
 
     ret = true;
 
-Base64_Encode_err:
-    free(out_buf);
-out_buf_err:
-    free(pem_buf);
+cleanup:
+    if (out_buf) {
+        free(out_buf);
+    }
+    if (pem_buf) {
+        free(pem_buf);
+    }
 
     return ret;
 }
 
+/*
+ * This function calculates the length of the string decoded from base64
+ */
 uint32_t pem_to_der_len(uint32_t pem_len) {
     static int PEM_LINE_SZ = 64;
     int plainSz = pem_len - ((pem_len + (PEM_LINE_SZ - 1)) / PEM_LINE_SZ );
@@ -234,6 +259,9 @@ cleanup:
     return ret;
 }
 
+/*
+ * Generate strong cryptographic random numbers
+ */
 int rand_bytes(uint8_t *output, int len) {
     WC_RNG rng;
     int ret;
@@ -255,6 +283,12 @@ int rand_bytes(uint8_t *output, int len) {
 
     return 1;
 }
+
+/*
+ *
+ * Key functions, allow manipulation of keys.
+ *
+ */
 
 int key_des_num_cblocks(const cipher_kt_t *kt) {
     int ret = 0;
@@ -337,7 +371,7 @@ static inline uint32_t ByteReverseWord32(uint32_t value)
 }
 
 
-/* check is not weak. Weak key list from Nist "Recommendation for the Triple
+/* check if not weak. Weak key list from Nist "Recommendation for the Triple
  * Data Encryption Algorithm (TDEA) Block Cipher"
  *
  * returns 1 if is weak 0 if not
@@ -479,6 +513,12 @@ void cipher_des_encrypt_ecb(const unsigned char key[DES_KEY_LENGTH],
     wc_Des_SetKey(&myDes, key, NULL, DES_ENCRYPTION);
     wc_Des_EcbEncrypt(&myDes, dst, src, DES_KEY_LENGTH);
 }
+
+/*
+ *
+ * Generic cipher key type functions
+ *
+ */
 
 const cipher_kt_t *cipher_kt_get(const char *ciphername) {
     const struct cipher* cipher;
@@ -630,6 +670,7 @@ int cipher_kt_mode(const cipher_kt_t *cipher_kt) {
         return 0;
     }
     switch (*cipher_kt) {
+    /* Not all cases included since OpenVPN only recognizes CBC, OFB, CFB, and GCM */
     case OV_WC_AES_128_CBC_TYPE:
     case OV_WC_AES_192_CBC_TYPE:
     case OV_WC_AES_256_CBC_TYPE:
@@ -650,9 +691,9 @@ int cipher_kt_mode(const cipher_kt_t *cipher_kt) {
     case OV_WC_CHACHA20_POLY1305_TYPE:
         return OPENVPN_MODE_GCM;
     case OV_WC_NULL_CIPHER_TYPE:
-        break;
+    default:
+        return 0;
     }
-    return 0;
 }
 
 bool cipher_kt_mode_cbc(const cipher_kt_t *cipher) {
@@ -679,9 +720,16 @@ bool cipher_kt_mode_aead(const cipher_kt_t *cipher) {
     return false;
 }
 
+/*
+ *
+ * Generic cipher context functions
+ *
+ */
+
 static void wc_cipher_init(cipher_ctx_t* ctx) {
     ctx->cipher_type = OV_WC_NULL_CIPHER_TYPE;
-    ctx->enc = OV_WC_ENCRYPT;
+    ctx->enc = -1;
+    ctx->buf_used = 0;
 }
 
 cipher_ctx_t *cipher_ctx_new(void) {
@@ -716,6 +764,9 @@ static void check_key_length(const cipher_kt_t kt, int key_len) {
     }
 }
 
+/*
+ * Function to setup context for cipher streams
+ */
 static int wolfssl_ctx_init(cipher_ctx_t *ctx, const uint8_t *key, int key_len, const uint8_t* iv,
                             const cipher_kt_t *kt, int enc) {
     int ret;
@@ -836,11 +887,16 @@ void cipher_ctx_init(cipher_ctx_t *ctx, const uint8_t *key, int key_len,
     }
 }
 
+/*
+ * Reset and zero values in cipher context
+ */
 void cipher_ctx_cleanup(cipher_ctx_t *ctx) {
     if (ctx) {
         ctx->cipher_type = OV_WC_NULL_CIPHER_TYPE;
         ctx->enc = -1;
+        ctx->buf_used = 0;
         memset(&ctx->cipher, 0, sizeof(ctx->cipher));
+        memset(&ctx->buf, 0, sizeof(ctx->buf));
     }
 }
 
@@ -872,6 +928,10 @@ const cipher_kt_t *cipher_ctx_get_cipher_kt(const cipher_ctx_t *ctx) {
     return NULL;
 }
 
+/*
+ * Reset the cipher context to the initial settings used in cipher_ctx_init
+ * and set a new IV
+ */
 int cipher_ctx_reset(cipher_ctx_t *ctx, const uint8_t *iv_buf) {
     int ret;
     if ((ret = wolfssl_ctx_init(ctx, NULL, 0, iv_buf, &ctx->cipher_type, -1)) != 1) {
@@ -890,6 +950,11 @@ int cipher_ctx_update_ad(cipher_ctx_t *ctx, const uint8_t *src, int src_len) {
     return 0;
 }
 
+/*
+ * Update cipher blocks. The data stream in src has to be padded (no check is done
+ * in this function). Do not call this function directly, use wolfssl_ctx_update
+ * instead.
+ */
 static int wolfssl_ctx_update_blocks(cipher_ctx_t *ctx, uint8_t *dst, int *dst_len,
                                          uint8_t *src, int src_len) {
     int ret;
@@ -1003,6 +1068,11 @@ static int wolfssl_ctx_update_blocks(cipher_ctx_t *ctx, uint8_t *dst, int *dst_l
     return 1;
 }
 
+/*
+ * This function wraps wolfssl_ctx_update_blocks by checking and storing input data
+ * that is not properly padded. The stored data is later concatenated with new blocks
+ * of data that are passed to this function.
+ */
 static int wolfssl_ctx_update(cipher_ctx_t *ctx, uint8_t *dst, int *dst_len,
                               uint8_t *src, int src_len) {
     int ret;
@@ -1071,6 +1141,9 @@ int cipher_ctx_update(cipher_ctx_t *ctx, uint8_t *dst, int *dst_len,
     return 1;
 }
 
+/*
+ * Pads the buffer of the cipher context with PKCS#7 padding
+ */
 static void pad_block(cipher_ctx_t *ctx) {
     int i, block_size;
     block_size = cipher_kt_block_size(&ctx->cipher_type);
@@ -1079,6 +1152,10 @@ static void pad_block(cipher_ctx_t *ctx) {
     }
 }
 
+/*
+ * Verifies the PKCS#7 padding of the block in the cipher context and
+ * returns the number of padding blocks.
+ */
 static int check_pad(cipher_ctx_t *ctx, uint8_t *buff, int block_size)
 {
     int i;
@@ -1092,6 +1169,11 @@ static int check_pad(cipher_ctx_t *ctx, uint8_t *buff, int block_size)
     return block_size - n;
 }
 
+/*
+ * Verify or add necessary padding and return final block. In case of decryption
+ * the length returned in dst_len is negative so as to remove the final padding
+ * blocks.
+ */
 static int wolfssl_ctx_final(cipher_ctx_t *ctx, uint8_t *dst, int *dst_len) {
     int block_size;
     int pad_left;
@@ -1141,6 +1223,12 @@ int cipher_ctx_final_check_tag(cipher_ctx_t *ctx, uint8_t *dst, int *dst_len,
     return 0;
 }
 
+/*
+ *
+ * Generic message digest information functions
+ *
+ */
+
 const md_kt_t *md_kt_get(const char *digest) {
     const struct digest* digest_;
 
@@ -1166,6 +1254,12 @@ int md_kt_size(const md_kt_t *kt) {
     }
     return wc_HashGetDigestSize(OV_to_WC_hash_type[*kt]);
 }
+
+/*
+ *
+ * Generic message digest functions
+ *
+ */
 
 int md_full(const md_kt_t *kt, const uint8_t *src, int src_len, uint8_t *dst) {
     int ret;
@@ -1226,6 +1320,12 @@ void md_ctx_final(md_ctx_t *ctx, uint8_t *dst) {
         msg(M_FATAL, "wc_HashFinal failed with Errno: %d", ret);
     }
 }
+
+/*
+ *
+ * Generic HMAC functions
+ *
+ */
 
 hmac_ctx_t *hmac_ctx_new(void) {
     hmac_ctx_t *ctx = (hmac_ctx_t*) malloc(sizeof(hmac_ctx_t));
@@ -1296,19 +1396,6 @@ void hmac_ctx_final(hmac_ctx_t *ctx, uint8_t *dst) {
         }
     }
 }
-
-//extern bool cipher_kt_var_key_size(const cipher_kt_t *cipher) {
-//    return false;
-//}
-
-const cipher_name_pair cipher_name_translation_table[] = {
-    { "AES-128-GCM", "AES-128-GCM" },
-    { "AES-192-GCM", "AES-192-GCM" },
-    { "AES-256-GCM", "AES-256-GCM" },
-    { "CHACHA20-POLY1305", "CHACHA20-POLY1305" },
-};
-const size_t cipher_name_translation_table_count =
-    sizeof(cipher_name_translation_table) / sizeof(*cipher_name_translation_table);
 
 
 #endif /* ENABLE_CRYPTO_WOLFSSL */

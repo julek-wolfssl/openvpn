@@ -72,7 +72,7 @@
 /** Generic cipher key type %context. */
 typedef enum {
     /* DO NOT CHANGE ORDER OF ELEMENTS */
-    OV_WC_AES_128_CBC_TYPE = 0,
+    OV_WC_AES_128_CBC_TYPE,
     OV_WC_AES_192_CBC_TYPE,
     OV_WC_AES_256_CBC_TYPE,
     OV_WC_AES_128_CTR_TYPE,
@@ -194,7 +194,7 @@ typedef struct {
 /** Generic message digest key type %context. */
 typedef enum {
     /* DO NOT CHANGE ORDER OF ELEMENTS */
-    OV_WC_MD4 = 0,
+    OV_WC_MD4,
     OV_WC_MD5,
     OV_WC_SHA,
     OV_WC_SHA224,
@@ -316,7 +316,7 @@ typedef enum {
     OPENVPN_MODE_GCM,
 } cipher_modes;
 
-#define DES_KEY_LENGTH 8
+#define DES_KEY_LENGTH          DES_KEY_SIZE
 #define MD4_DIGEST_LENGTH       16
 
 /** Cipher should encrypt */
