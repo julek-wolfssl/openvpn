@@ -29,6 +29,9 @@
 #ifndef CRYPTO_BACKEND_H_
 #define CRYPTO_BACKEND_H_
 
+/* TLS uses a tag of 128 bytes, let's do the same for OpenVPN */
+#define OPENVPN_AEAD_TAG_LENGTH 16
+
 #ifdef ENABLE_CRYPTO_OPENSSL
 #include "crypto_openssl.h"
 #endif
@@ -40,9 +43,6 @@
 #endif
 #include "basic.h"
 #include "buffer.h"
-
-/* TLS uses a tag of 128 bytes, let's do the same for OpenVPN */
-#define OPENVPN_AEAD_TAG_LENGTH 16
 
 /* Maximum cipher block size (bytes) */
 #define OPENVPN_MAX_CIPHER_BLOCK_SIZE 32

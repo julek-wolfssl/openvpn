@@ -1031,6 +1031,8 @@ elif test "${with_crypto_library}" = "wolfssl"; then
 		)
 	fi
 	
+	have_crypto_aead_modes="yes"
+	
 	CFLAGS="${WOLFSSL_CFLAGS} ${CFLAGS}"
 	LIBS="${WOLFSSL_LIBS} ${LIBS}"
 	AC_DEFINE([ENABLE_CRYPTO_WOLFSSL], [1], [Use wolfSSL crypto library])

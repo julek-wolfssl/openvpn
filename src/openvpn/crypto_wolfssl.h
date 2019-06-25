@@ -176,11 +176,14 @@ typedef struct {
         } chacha20_poly1305;
     #endif
     } cipher;
+
     cipher_kt_t cipher_type;
+
     enum {
         OV_WC_ENCRYPT,
         OV_WC_DECRYPT,
     } enc;
+
     union {
         uint8_t aes[AES_BLOCK_SIZE];
         uint8_t des[DES_BLOCK_SIZE];
@@ -189,6 +192,19 @@ typedef struct {
     #endif
     } buf;
     int buf_used;
+
+    union {
+        uint8_t aes[AES_BLOCK_SIZE];
+        uint8_t des[DES_BLOCK_SIZE];
+        uint8_t chacha[CHACHA_IV_BYTES];
+    } iv;
+
+    uint8_t aead_tag[OPENVPN_AEAD_TAG_LENGTH];
+    uint8_t* authIn;
+    word32 authInSz;
+
+    bool aead_updated;
+
 } cipher_ctx_t;
 
 /** Generic message digest key type %context. */
