@@ -23,30 +23,5 @@
  */
 
 /**
- * @file Control Channel wolfSSL Backend
+ * @file Control Channel Verification Module wolfSSL backend
  */
-
-#ifndef SSL_WOLFSSL_H_
-#define SSL_WOLFSSL_H_
-
-
-#include <wolfssl/wolfcrypt/settings.h>
-#include <wolfssl/ssl.h>
-
-# define TLS1_1_VERSION                  0x0302
-# define TLS1_2_VERSION                  0x0303
-# define TLS1_3_VERSION                  0x0304
-
-/**
- * Structure that wraps the TLS context. Contents differ depending on the
- * SSL library used.
- */
-struct tls_root_ctx {
-	WOLFSSL_CTX *ctx;
-};
-
-struct key_state_ssl {
-    WOLFSSL *ssl;
-};
-
-#endif /* SSL_WOLFSSL_H_ */

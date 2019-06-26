@@ -281,6 +281,11 @@ static void convert_tls13_list_to_openssl(char *openssl_ciphers, size_t len,
 
 
 void tls_ctx_restrict_ciphers_tls13(struct tls_root_ctx *ctx, const char *ciphers) {
+    if (ciphers == NULL) {
+        /* default cipher list is sane */
+        return;
+    }
+
 	// TODO CHECK IF tls_ctx_restrict_ciphers_tls13 MAKES SENSE IN WOLFSSL
     msg(M_FATAL, "tls_ctx_restrict_ciphers_tls13 may not have proper function in wolfSSL");
 }

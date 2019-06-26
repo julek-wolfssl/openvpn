@@ -616,6 +616,42 @@ int cipher_kt_iv_size(const cipher_kt_t *cipher_kt) {
     return 0;
 }
 
+static bool needs_padding(const cipher_kt_t *cipher_kt) {
+    if (cipher_kt == NULL) {
+        return false;
+    }
+    switch (*cipher_kt) {
+    case OV_WC_AES_128_CBC_TYPE:
+    case OV_WC_AES_192_CBC_TYPE:
+    case OV_WC_AES_256_CBC_TYPE:
+    case OV_WC_AES_128_ECB_TYPE:
+    case OV_WC_AES_192_ECB_TYPE:
+    case OV_WC_AES_256_ECB_TYPE:
+    case OV_WC_AES_128_GCM_TYPE:
+    case OV_WC_AES_192_GCM_TYPE:
+    case OV_WC_AES_256_GCM_TYPE:
+    case OV_WC_DES_CBC_TYPE:
+    case OV_WC_DES_ECB_TYPE:
+    case OV_WC_DES_EDE3_CBC_TYPE:
+    case OV_WC_DES_EDE3_ECB_TYPE:
+        return true;
+    case OV_WC_AES_128_OFB_TYPE:
+    case OV_WC_AES_192_OFB_TYPE:
+    case OV_WC_AES_256_OFB_TYPE:
+    case OV_WC_AES_128_CFB_TYPE:
+    case OV_WC_AES_192_CFB_TYPE:
+    case OV_WC_AES_256_CFB_TYPE:
+    case OV_WC_AES_128_CTR_TYPE:
+    case OV_WC_AES_192_CTR_TYPE:
+    case OV_WC_AES_256_CTR_TYPE:
+    case OV_WC_CHACHA20_POLY1305_TYPE:
+        return false;
+    case OV_WC_NULL_CIPHER_TYPE:
+        return false;
+    }
+    return false;
+}
+
 int cipher_kt_block_size(const cipher_kt_t *cipher_kt) {
     if (cipher_kt == NULL) {
         return 0;
@@ -881,7 +917,9 @@ static int wolfssl_ctx_init(cipher_ctx_t *ctx, const uint8_t *key, int key_len, 
     }
 
     ctx->cipher_type = *kt;
-    ctx->enc = enc == OPENVPN_OP_ENCRYPT ? OV_WC_ENCRYPT : OV_WC_DECRYPT;
+    if (enc == OPENVPN_OP_ENCRYPT || enc == OPENVPN_OP_DECRYPT) {
+        ctx->enc = enc == OPENVPN_OP_ENCRYPT ? OV_WC_ENCRYPT : OV_WC_DECRYPT;
+    }
     ctx->buf_used = 0;
     ctx->aead_updated = false;
     return 1;
@@ -992,7 +1030,10 @@ static int wolfssl_ctx_update_blocks(cipher_ctx_t *ctx, uint8_t *dst, int *dst_l
                                          uint8_t *src, int src_len) {
     int ret, buf_len, i, j, pad_val;
     uint8_t* buf;
-    ASSERT((src_len % cipher_kt_block_size(&ctx->cipher_type)) == 0);
+    if (needs_padding(&ctx->cipher_type)) {
+        /* AEAD ciphers handle padding on their own */
+        ASSERT((src_len % cipher_kt_block_size(&ctx->cipher_type)) == 0);
+    }
 
     switch (ctx->cipher_type) {
     case OV_WC_AES_128_CBC_TYPE:
@@ -1188,10 +1229,12 @@ static int wolfssl_ctx_update(cipher_ctx_t *ctx, uint8_t *dst, int *dst_len,
         return 1;
     }
 
-    if (cipher_kt_mode_aead(&ctx->cipher_type)) {
-        /* In case of AEAD send data straight to wolfssl_ctx_update_blocks and don't process padding */
-        if ((ret = wolfssl_ctx_update_blocks(ctx, dst, dst_len,
-                                             (uint8_t*)&(ctx->buf), block_size) != 1)) {
+    if (!needs_padding(&ctx->cipher_type)) {
+        /*
+         * In case of AEAD and no padding needed send data straight to wolfssl_ctx_update_blocks
+         * and don't process padding
+         */
+        if ((ret = wolfssl_ctx_update_blocks(ctx, dst, dst_len, src, src_len) != 1)) {
             msg(M_FATAL, "%s: wolfssl_ctx_update_blocks() failed", __func__);
             return 0;
         }
@@ -1293,17 +1336,19 @@ static int wolfssl_ctx_final(cipher_ctx_t *ctx, uint8_t *dst, int *dst_len) {
         return 0;
     }
 
-    block_size = cipher_kt_block_size(&ctx->cipher_type);
     *dst_len = 0;
 
-    if (cipher_kt_mode_aead(&ctx->cipher_type)) {
-        /* Nothing to do for AEAD ciphers */
+    if (ctx->buf_used == 0) {
         return 1;
     }
 
+    block_size = cipher_kt_block_size(&ctx->cipher_type);
+
     if (!cipher_kt_mode_aead(&ctx->cipher_type)) {
         if (ctx->enc == OV_WC_ENCRYPT) {
-            pad_block(ctx);
+            if (needs_padding(&ctx->cipher_type)) {
+                pad_block(ctx);
+            }
             if (wolfssl_ctx_update_blocks(ctx, dst, dst_len, (uint8_t*)&ctx->buf,
                                           block_size) != 1) {
                 return 0;

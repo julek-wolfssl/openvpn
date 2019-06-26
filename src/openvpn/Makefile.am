@@ -116,10 +116,12 @@ openvpn_SOURCES = \
 	ssl.c ssl.h  ssl_backend.h \
 	ssl_openssl.c ssl_openssl.h \
 	ssl_mbedtls.c ssl_mbedtls.h \
+	ssl_wolfssl.c ssl_wolfssl.h \
 	ssl_common.h \
 	ssl_verify.c ssl_verify.h ssl_verify_backend.h \
 	ssl_verify_openssl.c ssl_verify_openssl.h \
 	ssl_verify_mbedtls.c ssl_verify_mbedtls.h \
+	ssl_verify_wolfssl.c ssl_verify_wolfssl.h \
 	status.c status.h \
 	syshead.h \
 	tls_crypt.c tls_crypt.h \
