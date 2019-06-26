@@ -732,6 +732,8 @@ static void wc_cipher_init(cipher_ctx_t* ctx) {
     ctx->cipher_type = OV_WC_NULL_CIPHER_TYPE;
     ctx->enc = -1;
     ctx->buf_used = 0;
+    ctx->aead_buf_len = 0;
+    ctx->aead_buf = NULL;
     ctx->authInSz = 0;
     ctx->authIn = NULL;
 }
@@ -750,6 +752,11 @@ void cipher_ctx_free(cipher_ctx_t *ctx) {
             free(ctx->authIn);
             ctx->authIn = NULL;
             ctx->authInSz = 0;
+        }
+        if (ctx->aead_buf) {
+            free(ctx->aead_buf);
+            ctx->aead_buf = NULL;
+            ctx->aead_buf_len = 0;
         }
     }
 }
@@ -924,6 +931,11 @@ void cipher_ctx_cleanup(cipher_ctx_t *ctx) {
             ctx->authIn = NULL;
             ctx->authInSz = 0;
         }
+        if (ctx->aead_buf) {
+            free(ctx->aead_buf);
+            ctx->aead_buf = NULL;
+            ctx->aead_buf_len = 0;
+        }
     }
 }
 
@@ -1090,32 +1102,21 @@ static int wolfssl_ctx_update_blocks(cipher_ctx_t *ctx, uint8_t *dst, int *dst_l
             free(buf);
             *dst_len += pad_val;
         } else {
-            if ((src_len - OPENVPN_AEAD_TAG_LENGTH) % AES_BLOCK_SIZE) {
-                msg(M_FATAL, "Incorrect padding. Src length: %d", src_len - OPENVPN_AEAD_TAG_LENGTH);
+            /*
+             * Decryption needs to be handled in Final call since wolfSSL also checks
+             * that the auth tag is correct.
+             */
+            if ((src_len) % AES_BLOCK_SIZE) {
+                msg(M_FATAL, "Incorrect padding. Src length: %d", src_len);
                 return 0;
             }
-            /* The authentication tag is at the end of the src buffer */
-            if ((ret = wc_AesGcmDecrypt(&ctx->cipher.aes, dst, src, src_len - OPENVPN_AEAD_TAG_LENGTH,
-                                        ctx->iv.aes, AES_BLOCK_SIZE,
-                                        src + src_len - OPENVPN_AEAD_TAG_LENGTH, OPENVPN_AEAD_TAG_LENGTH,
-                                        ctx->authIn, ctx->authInSz)) != 0) {
-                msg(M_FATAL, "wc_AesGcmDecrypt failed with Errno: %d", ret);
-                return 0;
-            }
-            /* CHECK PADDING */
-            pad_val = dst[src_len - OPENVPN_AEAD_TAG_LENGTH - 1];
-            if (pad_val > AES_BLOCK_SIZE) {
-                msg(M_FATAL, "Incorrect padding. Pad value: %d", pad_val);
-                return 0;
-            }
-            for (i = 0; i < pad_val; i++) {
-                if (src[src_len - OPENVPN_AEAD_TAG_LENGTH-i-1] != pad_val) {
-                    msg(M_FATAL, "Incorrect padding. Src value: %d; Expected: %d", \
-                            src[src_len - OPENVPN_AEAD_TAG_LENGTH-i-1], pad_val);
-                    return 0;
-                }
-            }
-            *dst_len -= pad_val;
+            ASSERT(!ctx->aead_buf);
+            ctx->aead_buf = (uint8_t*) malloc(src_len);
+            check_malloc_return(ctx->aead_buf);
+            memcpy(ctx->aead_buf, src, src_len);
+            ctx->aead_buf_len = src_len;
+
+            *dst_len -= src_len;
         }
         ctx->aead_updated = true;
         break;
@@ -1329,8 +1330,32 @@ int cipher_ctx_final(cipher_ctx_t *ctx, uint8_t *dst, int *dst_len) {
 int cipher_ctx_final_check_tag(cipher_ctx_t *ctx, uint8_t *dst, int *dst_len,
                                uint8_t *tag, size_t tag_len) {
 #ifdef HAVE_AEAD_CIPHER_MODES
-    /* If cipher_ctx_update passed then all is good */
-    return 1;
+    int ret, pad_val, i;
+
+    if (!ctx || !dst_len|| !dst || !tag || tag_len <= 0) {
+        return 0;
+    }
+
+    if ((ret = wc_AesGcmDecrypt(&ctx->cipher.aes, dst, ctx->aead_buf, ctx->aead_buf_len,
+                                ctx->iv.aes, AES_BLOCK_SIZE, tag, tag_len, ctx->authIn,
+                                ctx->authInSz)) != 0) {
+        msg(M_FATAL, "wc_AesGcmDecrypt failed with Errno: %d", ret);
+        return 0;
+    }
+    /* CHECK PADDING */
+    pad_val = dst[ctx->aead_buf_len - 1];
+    if (pad_val > AES_BLOCK_SIZE) {
+        msg(M_FATAL, "Incorrect padding. Pad value: %d", pad_val);
+        return 0;
+    }
+    for (i = 0; i < pad_val; i++) {
+        if (dst[ctx->aead_buf_len-i-1] != pad_val) {
+            msg(M_FATAL, "Incorrect padding. Src value: %d; Expected: %d", \
+                    dst[ctx->aead_buf_len-i-1], pad_val);
+            return 0;
+        }
+    }
+    *dst_len = ctx->aead_buf_len - pad_val;
 #else
     ASSERT(0);
 #endif

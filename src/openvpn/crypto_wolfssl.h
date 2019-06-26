@@ -199,12 +199,14 @@ typedef struct {
         uint8_t chacha[CHACHA_IV_BYTES];
     } iv;
 
-    uint8_t aead_tag[OPENVPN_AEAD_TAG_LENGTH];
-    uint8_t* authIn;
-    word32 authInSz;
-
     bool aead_updated;
+    uint8_t aead_tag[OPENVPN_AEAD_TAG_LENGTH];
 
+    uint8_t* authIn;
+    int authInSz;
+
+    uint8_t* aead_buf;
+    int aead_buf_len;
 } cipher_ctx_t;
 
 /** Generic message digest key type %context. */
