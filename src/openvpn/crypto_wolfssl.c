@@ -609,7 +609,7 @@ int cipher_kt_iv_size(const cipher_kt_t *cipher_kt) {
     case OV_WC_DES_EDE3_ECB_TYPE:
         return DES_BLOCK_SIZE;
     case OV_WC_CHACHA20_POLY1305_TYPE:
-        return CHACHA_IV_BYTES;
+        return CHACHA20_POLY1305_AEAD_IV_SIZE;
     case OV_WC_NULL_CIPHER_TYPE:
         return 0;
     }
@@ -813,7 +813,7 @@ static int wolfssl_ctx_init(cipher_ctx_t *ctx, const uint8_t *key, int key_len, 
                 return 0;
             }
         }
-        if (iv) {
+        if (iv && !key) {
             if ((ret = wc_AesSetIV(&ctx->cipher.aes, iv))) {
                 msg(M_FATAL, "wc_AesSetIV failed with Errno: %d", ret);
                 return 0;
@@ -844,7 +844,7 @@ static int wolfssl_ctx_init(cipher_ctx_t *ctx, const uint8_t *key, int key_len, 
                 return 0;
             }
         }
-        if (iv) {
+        if (iv && !key) {
             wc_Des_SetIV(&ctx->cipher.des, iv);
         }
         break;
@@ -859,7 +859,7 @@ static int wolfssl_ctx_init(cipher_ctx_t *ctx, const uint8_t *key, int key_len, 
                 return 0;
             }
         }
-        if (iv) {
+        if (iv && !key) {
             if ((ret = wc_Des3_SetIV(&ctx->cipher.des3, iv)) != 0) {
                 msg(M_FATAL, "wc_Des3_SetIV failed with Errno: %d", ret);
                 return 0;
@@ -867,29 +867,13 @@ static int wolfssl_ctx_init(cipher_ctx_t *ctx, const uint8_t *key, int key_len, 
         }
         break;
     case OV_WC_CHACHA20_POLY1305_TYPE:
+        ASSERT(CHACHA20_POLY1305_AEAD_AUTHTAG_SIZE == OPENVPN_AEAD_TAG_LENGTH);
         if (key) {
-            memcpy(ctx->cipher.chacha20_poly1305.init_poly1305Key, key,
+            memcpy(ctx->cipher.chacha20_poly1305_key, key,
                    CHACHA20_POLY1305_AEAD_KEYSIZE);
         }
         if (iv) {
-            if ((ret = wc_Chacha_SetKey(&ctx->cipher.chacha20_poly1305.chacha,
-                                        ctx->cipher.chacha20_poly1305.init_poly1305Key,
-                                        CHACHA20_POLY1305_AEAD_KEYSIZE)) != 0) {
-                msg(M_FATAL, "wc_Chacha_SetKey failed with Errno: %d", ret);
-                return 0;
-            }
-            if ((ret = wc_Chacha_SetIV(&ctx->cipher.chacha20_poly1305.chacha,
-                                       iv, 0)) != 0) {
-                msg(M_FATAL, "wc_Chacha_SetIV failed with Errno: %d", ret);
-                return 0;
-            }
-            if ((ret = wc_Chacha_Process(&ctx->cipher.chacha20_poly1305.chacha,
-                                         ctx->cipher.chacha20_poly1305.tag_poly1305Key,
-                                         ctx->cipher.chacha20_poly1305.init_poly1305Key,
-                                         CHACHA20_POLY1305_AEAD_KEYSIZE)) != 0) {
-                msg(M_FATAL, "wc_Chacha_Process failed with Errno: %d", ret);
-                return 0;
-            }
+            memcpy(ctx->iv.chacha20_poly1305, iv, CHACHA20_POLY1305_AEAD_IV_SIZE);
         }
         break;
     case OV_WC_NULL_CIPHER_TYPE:
@@ -1155,7 +1139,27 @@ static int wolfssl_ctx_update_blocks(cipher_ctx_t *ctx, uint8_t *dst, int *dst_l
             msg(M_FATAL, "AEAD ALGORITHMS MAY ONLY CALL UPDATE ONCE");
             return 0;
         }
-        msg(M_FATAL, "AEAD NOT IMPLEMENTED YET");
+        if (ctx->enc == OV_WC_ENCRYPT) {
+            if ((ret = wc_ChaCha20Poly1305_Encrypt(ctx->cipher.chacha20_poly1305_key,
+                                                   ctx->iv.chacha20_poly1305, ctx->authIn, ctx->authInSz,
+                                                   src, src_len, dst, ctx->aead_tag)) != 0) {
+                msg(M_FATAL, "wc_ChaCha20Poly1305_Encrypt failed with Errno: %d", ret);
+                return 0;
+            }
+        } else {
+            /*
+             * Store for later since wc_ChaCha20Poly1305_Decrypt also takes in the
+             * correct tag as a parameter and automatically checks it.
+             */
+            ASSERT(!ctx->aead_buf);
+            ctx->aead_buf = (uint8_t*) malloc(src_len);
+            check_malloc_return(ctx->aead_buf);
+            memcpy(ctx->aead_buf, src, src_len);
+            ctx->aead_buf_len = src_len;
+
+            *dst_len -= src_len;
+        }
+        ctx->aead_updated = true;
         break;
     case OV_WC_NULL_CIPHER_TYPE:
         return 0;
@@ -1336,26 +1340,51 @@ int cipher_ctx_final_check_tag(cipher_ctx_t *ctx, uint8_t *dst, int *dst_len,
         return 0;
     }
 
-    if ((ret = wc_AesGcmDecrypt(&ctx->cipher.aes, dst, ctx->aead_buf, ctx->aead_buf_len,
-                                ctx->iv.aes, AES_BLOCK_SIZE, tag, tag_len, ctx->authIn,
-                                ctx->authInSz)) != 0) {
-        msg(M_FATAL, "wc_AesGcmDecrypt failed with Errno: %d", ret);
-        return 0;
-    }
-    /* CHECK PADDING */
-    pad_val = dst[ctx->aead_buf_len - 1];
-    if (pad_val > AES_BLOCK_SIZE) {
-        msg(M_FATAL, "Incorrect padding. Pad value: %d", pad_val);
-        return 0;
-    }
-    for (i = 0; i < pad_val; i++) {
-        if (dst[ctx->aead_buf_len-i-1] != pad_val) {
-            msg(M_FATAL, "Incorrect padding. Src value: %d; Expected: %d", \
-                    dst[ctx->aead_buf_len-i-1], pad_val);
+    ASSERT(ctx->enc == OV_WC_DECRYPT);
+
+    switch(ctx->cipher_type) {
+    case OV_WC_AES_128_GCM_TYPE:
+    case OV_WC_AES_192_GCM_TYPE:
+    case OV_WC_AES_256_GCM_TYPE:
+        if ((ret = wc_AesGcmDecrypt(&ctx->cipher.aes, dst, ctx->aead_buf, ctx->aead_buf_len,
+                                    ctx->iv.aes, AES_BLOCK_SIZE, tag, tag_len, ctx->authIn,
+                                    ctx->authInSz)) != 0) {
+            msg(M_FATAL, "wc_AesGcmDecrypt failed with Errno: %d", ret);
             return 0;
         }
+        /* CHECK PADDING */
+        pad_val = dst[ctx->aead_buf_len - 1];
+        if (pad_val > AES_BLOCK_SIZE) {
+            msg(M_FATAL, "Incorrect padding. Pad value: %d", pad_val);
+            return 0;
+        }
+        for (i = 0; i < pad_val; i++) {
+            if (dst[ctx->aead_buf_len-i-1] != pad_val) {
+                msg(M_FATAL, "Incorrect padding. Src value: %d; Expected: %d",
+                    dst[ctx->aead_buf_len-i-1], pad_val);
+                return 0;
+            }
+        }
+        *dst_len = ctx->aead_buf_len - pad_val;
+        break;
+    case OV_WC_CHACHA20_POLY1305_TYPE:
+        if (tag_len != CHACHA20_POLY1305_AEAD_AUTHTAG_SIZE) {
+            msg(M_FATAL, "Incorrect tag length for Chacha20_Poly1305. Got: %d ; Need: %d",
+                (int)tag_len, CHACHA20_POLY1305_AEAD_AUTHTAG_SIZE);
+            return 0;
+        }
+        if ((ret = wc_ChaCha20Poly1305_Decrypt(ctx->cipher.chacha20_poly1305_key, ctx->iv.chacha20_poly1305,
+                                               ctx->authIn, ctx->authInSz, ctx->aead_buf, ctx->aead_buf_len,
+                                               tag, dst)) != 0) {
+            msg(M_FATAL, "wc_ChaCha20Poly1305_Decrypt failed with Errno: %d", ret);
+            return 0;
+        }
+        *dst_len = ctx->aead_buf_len;
+        break;
+    default:
+        msg(M_FATAL, "cipher_ctx_final_check_tag called with none AEAD cipher.");
+        return 0;
     }
-    *dst_len = ctx->aead_buf_len - pad_val;
 #else
     ASSERT(0);
 #endif

@@ -169,11 +169,7 @@ typedef struct {
         Des3 des3;
     #endif
     #ifdef HAVE_CHACHA
-        struct {
-            ChaCha chacha;
-            uint8_t tag_poly1305Key[CHACHA20_POLY1305_AEAD_KEYSIZE];
-            uint8_t init_poly1305Key[CHACHA20_POLY1305_AEAD_KEYSIZE];
-        } chacha20_poly1305;
+        uint8_t chacha20_poly1305_key[CHACHA20_POLY1305_AEAD_KEYSIZE];
     #endif
     } cipher;
 
@@ -187,16 +183,13 @@ typedef struct {
     union {
         uint8_t aes[AES_BLOCK_SIZE];
         uint8_t des[DES_BLOCK_SIZE];
-    #ifdef HAVE_CHACHA
-        uint8_t chacha[CHACHA_CHUNK_BYTES];
-    #endif
     } buf;
     int buf_used;
 
     union {
         uint8_t aes[AES_BLOCK_SIZE];
         uint8_t des[DES_BLOCK_SIZE];
-        uint8_t chacha[CHACHA_IV_BYTES];
+        uint8_t chacha20_poly1305[CHACHA20_POLY1305_AEAD_IV_SIZE];
     } iv;
 
     bool aead_updated;
