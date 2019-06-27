@@ -135,10 +135,11 @@ const size_t cipher_name_translation_table_count =
 /*
  * This function calculates the length of the resulting base64 encoded string
  */
+static const int PEM_LINE_SZ = 64;
 uint32_t der_to_pem_len(uint32_t der_len) {
     uint32_t pem_len;
     pem_len = (der_len + 2) / 3 * 4;
-    pem_len += (pem_len + 63) / 64;
+    pem_len += (pem_len + PEM_LINE_SZ - 1) / PEM_LINE_SZ; /* new lines */
     return pem_len;
 }
 
@@ -203,7 +204,6 @@ cleanup:
  * This function calculates the length of the string decoded from base64
  */
 uint32_t pem_to_der_len(uint32_t pem_len) {
-    static int PEM_LINE_SZ = 64;
     int plainSz = pem_len - ((pem_len + (PEM_LINE_SZ - 1)) / PEM_LINE_SZ );
     return (plainSz * 3 + 3) / 4;
 }
@@ -826,17 +826,14 @@ static int wolfssl_ctx_init(cipher_ctx_t *ctx, const uint8_t *key, int key_len, 
     switch (*kt) {
     /* SETUP AES */
     case OV_WC_AES_128_CBC_TYPE:
-    case OV_WC_AES_128_CTR_TYPE:
     case OV_WC_AES_128_ECB_TYPE:
     case OV_WC_AES_128_OFB_TYPE:
     case OV_WC_AES_128_CFB_TYPE:
     case OV_WC_AES_192_CBC_TYPE:
-    case OV_WC_AES_192_CTR_TYPE:
     case OV_WC_AES_192_ECB_TYPE:
     case OV_WC_AES_192_OFB_TYPE:
     case OV_WC_AES_192_CFB_TYPE:
     case OV_WC_AES_256_CBC_TYPE:
-    case OV_WC_AES_256_CTR_TYPE:
     case OV_WC_AES_256_ECB_TYPE:
     case OV_WC_AES_256_OFB_TYPE:
     case OV_WC_AES_256_CFB_TYPE:
@@ -855,6 +852,25 @@ static int wolfssl_ctx_init(cipher_ctx_t *ctx, const uint8_t *key, int key_len, 
                 return 0;
             }
         }
+        break;
+    case OV_WC_AES_128_CTR_TYPE:
+    case OV_WC_AES_192_CTR_TYPE:
+    case OV_WC_AES_256_CTR_TYPE:
+        if (key) {
+            if ((ret = wc_AesSetKeyDirect(
+                    &ctx->cipher.aes, key, key_len, iv, AES_ENCRYPTION
+                )) != 0) {
+                msg(M_FATAL, "wc_AesSetKey failed with Errno: %d", ret);
+                return 0;
+            }
+        }
+        if (iv && !key) {
+            if ((ret = wc_AesSetIV(&ctx->cipher.aes, iv))) {
+                msg(M_FATAL, "wc_AesSetIV failed with Errno: %d", ret);
+                return 0;
+            }
+        }
+        break;
         break;
     case OV_WC_AES_128_GCM_TYPE:
     case OV_WC_AES_192_GCM_TYPE:
@@ -904,16 +920,16 @@ static int wolfssl_ctx_init(cipher_ctx_t *ctx, const uint8_t *key, int key_len, 
         break;
     case OV_WC_CHACHA20_POLY1305_TYPE:
         ASSERT(CHACHA20_POLY1305_AEAD_AUTHTAG_SIZE == OPENVPN_AEAD_TAG_LENGTH);
-        if (key) {
-            memcpy(ctx->cipher.chacha20_poly1305_key, key,
-                   CHACHA20_POLY1305_AEAD_KEYSIZE);
-        }
         if (iv) {
             memcpy(ctx->iv.chacha20_poly1305, iv, CHACHA20_POLY1305_AEAD_IV_SIZE);
         }
         break;
     case OV_WC_NULL_CIPHER_TYPE:
         return 0;
+    }
+
+    if (key) {
+        memcpy(&ctx->key, key, key_len);
     }
 
     ctx->cipher_type = *kt;
@@ -948,6 +964,7 @@ void cipher_ctx_cleanup(cipher_ctx_t *ctx) {
         memset(&ctx->cipher, 0, sizeof(ctx->cipher));
         memset(&ctx->buf, 0, sizeof(ctx->buf));
         memset(&ctx->aead_tag, 0, sizeof(ctx->aead_tag));
+        memset(&ctx->key, 0, sizeof(ctx->key));
         if (ctx->authIn) {
             free(ctx->authIn);
             ctx->authIn = NULL;
@@ -999,7 +1016,8 @@ const cipher_kt_t *cipher_ctx_get_cipher_kt(const cipher_ctx_t *ctx) {
  */
 int cipher_ctx_reset(cipher_ctx_t *ctx, const uint8_t *iv_buf) {
     int ret;
-    if ((ret = wolfssl_ctx_init(ctx, NULL, 0, iv_buf, &ctx->cipher_type, -1)) != 1) {
+    if ((ret = wolfssl_ctx_init(ctx, (uint8_t*)&ctx->key, cipher_kt_key_size(&ctx->cipher_type),
+                                iv_buf, &ctx->cipher_type, -1)) != 1) {
         msg(M_FATAL, "wolfssl_ctx_init failed with Errno: %d", ret);
         return 0;
     }
@@ -1032,6 +1050,7 @@ static int wolfssl_ctx_update_blocks(cipher_ctx_t *ctx, uint8_t *dst, int *dst_l
     uint8_t* buf;
     if (needs_padding(&ctx->cipher_type)) {
         /* AEAD ciphers handle padding on their own */
+        /* some ciphers don't need padding */
         ASSERT((src_len % cipher_kt_block_size(&ctx->cipher_type)) == 0);
     }
 
@@ -1181,7 +1200,7 @@ static int wolfssl_ctx_update_blocks(cipher_ctx_t *ctx, uint8_t *dst, int *dst_l
             return 0;
         }
         if (ctx->enc == OV_WC_ENCRYPT) {
-            if ((ret = wc_ChaCha20Poly1305_Encrypt(ctx->cipher.chacha20_poly1305_key,
+            if ((ret = wc_ChaCha20Poly1305_Encrypt(ctx->key.chacha20_poly1305_key,
                                                    ctx->iv.chacha20_poly1305, ctx->authIn, ctx->authInSz,
                                                    src, src_len, dst, ctx->aead_tag)) != 0) {
                 msg(M_FATAL, "wc_ChaCha20Poly1305_Encrypt failed with Errno: %d", ret);
@@ -1418,7 +1437,7 @@ int cipher_ctx_final_check_tag(cipher_ctx_t *ctx, uint8_t *dst, int *dst_len,
                 (int)tag_len, CHACHA20_POLY1305_AEAD_AUTHTAG_SIZE);
             return 0;
         }
-        if ((ret = wc_ChaCha20Poly1305_Decrypt(ctx->cipher.chacha20_poly1305_key, ctx->iv.chacha20_poly1305,
+        if ((ret = wc_ChaCha20Poly1305_Decrypt(ctx->key.chacha20_poly1305_key, ctx->iv.chacha20_poly1305,
                                                ctx->authIn, ctx->authInSz, ctx->aead_buf, ctx->aead_buf_len,
                                                tag, dst)) != 0) {
             msg(M_FATAL, "wc_ChaCha20Poly1305_Decrypt failed with Errno: %d", ret);
@@ -1541,7 +1560,7 @@ void md_ctx_final(md_ctx_t *ctx, uint8_t *dst) {
  */
 
 hmac_ctx_t *hmac_ctx_new(void) {
-    hmac_ctx_t *ctx = (hmac_ctx_t*) malloc(sizeof(hmac_ctx_t));
+    hmac_ctx_t *ctx = (hmac_ctx_t*) calloc(sizeof(hmac_ctx_t), 1);
     check_malloc_return(ctx);
     return ctx;
 }
@@ -1557,7 +1576,6 @@ void hmac_ctx_init(hmac_ctx_t *ctx, const uint8_t *key, int key_length,
     int ret;
     ASSERT(NULL != kt && NULL != ctx);
 
-    hmac_ctx_free(ctx);
     if ((ret = wc_HmacSetKey(&ctx->hmac, OV_to_WC_hash_type[*kt], key, key_length)) != 0) {
         msg(M_FATAL, "wc_HmacSetKey failed. Errno: %d", ret);
     }
@@ -1588,7 +1606,14 @@ int hmac_ctx_size(const hmac_ctx_t *ctx) {
 
 void hmac_ctx_reset(hmac_ctx_t *ctx) {
     if (ctx) {
-        hmac_ctx_init(ctx, (uint8_t*)&ctx->key, ctx->key_len, (md_kt_t*)&ctx->hmac.macType);
+        md_kt_t md;
+        for (md = 0; md <= OV_WC_NULL_DIGEST; md++) {
+            if (ctx->hmac.macType == OV_to_WC_hash_type[md]) {
+                hmac_ctx_init(ctx, (uint8_t*)&ctx->key, ctx->key_len, &md);
+                return;
+            }
+        }
+        msg(M_FATAL, "invalid ctx->hmac.macType");
     }
 }
 

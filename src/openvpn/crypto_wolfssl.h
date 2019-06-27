@@ -173,6 +173,15 @@ typedef struct {
     #endif
     } cipher;
 
+    union {
+        uint8_t aes_128[AES_128_KEY_SIZE];
+        uint8_t aes_192[AES_192_KEY_SIZE];
+        uint8_t aes_256[AES_256_KEY_SIZE];
+        uint8_t des[DES_KEY_SIZE];
+        uint8_t des3[DES3_KEY_SIZE];
+        uint8_t chacha20_poly1305_key[CHACHA20_POLY1305_AEAD_KEYSIZE];
+    } key;
+
     cipher_kt_t cipher_type;
 
     enum {
