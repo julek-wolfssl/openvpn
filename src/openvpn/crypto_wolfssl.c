@@ -1466,6 +1466,9 @@ const md_kt_t *md_kt_get(const char *digest) {
 
     for (digest_ = digest_tbl; digest_->name != NULL; digest_++) {
         if(strncmp(digest, digest_->name, strlen(digest_->name)+1) == 0) {
+            if (digest_->type == OV_WC_MD4) {
+                msg(M_FATAL, "MD4 not supported in wolfssl generic functions.");
+            }
             return &digest_static[digest_->type];
         }
     }
