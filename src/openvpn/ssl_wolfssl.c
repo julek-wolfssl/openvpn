@@ -166,18 +166,57 @@ void tls_ctx_set_cert_profile(struct tls_root_ctx *ctx, const char *profile) {
 }
 
 void tls_ctx_check_cert_time(const struct tls_root_ctx *ctx) {
-    if (ctx == NULL) {
+    /*
+     * This is verified during loading of certificate.
+     */
+}
+
+void tls_ctx_load_dh_params(struct tls_root_ctx *ctx, const char *dh_file,
+                            const char *dh_file_inline) {
+    msg(M_FATAL, "NEEDS TESTING %s", __func__);
+    int dh_len;
+    const char* cert;
+    byte*  p = NULL;
+    byte*  g = NULL;
+    word32 pSz = MAX_DH_SIZE;
+    word32 gSz = MAX_DH_SIZE;
+    DerBuffer der;
+    struct buffer cert_buf = {0};
+
+    ASSERT(ctx != NULL);
+
+    if (!strcmp(dh_file, INLINE_FILE_TAG) && dh_file_inline) {
+        /* Parameters in memory */
+        if ((dh_len = strlen(dh_file_inline)) == 0) {
+            msg(M_FATAL, "Empty DH parameters passed.");
+            return;
+        }
+        cert = dh_file_inline;
+    } else {
+        /* Parameters in file */
+        cert_buf = buffer_read_from_file(dh_file, NULL);
+        if (!BPTR(cert_buf)) {
+            msg(M_FATAL, "Failed to read file: %s", dh_file);
+            return;
+        }
+        cert = BPTR(cert_buf);
+        dh_len = BLEN(cert_buf);
+    }
+
+    if (PemToDer(cert, dh_len, DH_PARAM_TYPE, &der, NULL, NULL, NULL) != 0) {
+        if (BPTR(cert_buf)) {
+            free_buf(cert_buf);
+        }
+        msg(M_FATAL, "Failed to read file: %s", dh_file);
         return;
     }
 
-    WOLFSSL* ssl = wolfSSL_new(ctx->ctx);
-
-    WOLFSSL_X509* our_cert = wolfSSL_get_certificate(ssl);
-
-    const unsigned char* not_before = wolfSSL_X509_notBefore(our_cert);
-
-    wolfSSL_free(ssl);
+    cleanup:
+    if (BPTR(cert_buf)) {
+        free_buf(cert_buf);
+    }
 }
+
 
 
 
