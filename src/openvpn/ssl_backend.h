@@ -44,6 +44,7 @@
 #endif
 #ifdef ENABLE_CRYPTO_WOLFSSL
 #include "ssl_wolfssl.h"
+#include "ssl_verify_wolfssl.h"
 #define SSLAPI SSLAPI_WOLFSSL
 #endif
 

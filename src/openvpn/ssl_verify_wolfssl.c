@@ -25,3 +25,20 @@
 /**
  * @file Control Channel Verification Module wolfSSL backend
  */
+
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#elif defined(_MSC_VER)
+#include "config-msvc.h"
+#endif
+
+
+#if defined(ENABLE_CRYPTO_WOLFSSL)
+
+#include "ssl_verify_wolfssl.h"
+
+int verify_callback(int preverify_ok, WOLFSSL_X509_STORE_CTX *ctx) {
+    return 0;
+}
+
+#endif /* ENABLE_CRYPTO_WOLFSSL */

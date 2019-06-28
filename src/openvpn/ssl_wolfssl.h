@@ -29,6 +29,7 @@
 #ifndef SSL_WOLFSSL_H_
 #define SSL_WOLFSSL_H_
 
+#define KEEP_OUR_CERT
 
 #include <wolfssl/wolfcrypt/settings.h>
 #include <wolfssl/ssl.h>
@@ -43,6 +44,8 @@
  */
 struct tls_root_ctx {
 	WOLFSSL_CTX *ctx;
+    time_t crl_last_mtime;
+    off_t crl_last_size;
 };
 
 struct key_state_ssl {

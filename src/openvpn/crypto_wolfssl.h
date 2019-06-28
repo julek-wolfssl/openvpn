@@ -42,15 +42,14 @@
 // Digests
 #include <wolfssl/wolfcrypt/md4.h>
 #include <wolfssl/wolfcrypt/md5.h>
-
-// Encryption ciphers
-#include <wolfssl/wolfcrypt/aes.h>
-#include <wolfssl/wolfcrypt/des3.h>
 #include <wolfssl/wolfcrypt/sha.h>
 #include <wolfssl/wolfcrypt/sha256.h>
 #include <wolfssl/wolfcrypt/sha3.h>
 #include <wolfssl/wolfcrypt/sha512.h>
-#include <wolfssl/wolfcrypt/ripemd.h>
+
+// Encryption ciphers
+#include <wolfssl/wolfcrypt/aes.h>
+#include <wolfssl/wolfcrypt/des3.h>
 #include <wolfssl/wolfcrypt/chacha.h>
 #include <wolfssl/wolfcrypt/chacha20_poly1305.h>
 #include <wolfssl/wolfcrypt/poly1305.h>
@@ -62,6 +61,7 @@
 
 #include <stdbool.h>
 
+# define SHA_DIGEST_LENGTH       WC_SHA_DIGEST_SIZE
 # define SHA224_DIGEST_LENGTH    WC_SHA224_DIGEST_SIZE
 # define SHA256_DIGEST_LENGTH    WC_SHA256_DIGEST_SIZE
 # define SHA384_DIGEST_LENGTH    WC_SHA384_DIGEST_SIZE
@@ -337,7 +337,8 @@ typedef enum {
 } cipher_modes;
 
 #define DES_KEY_LENGTH          DES_KEY_SIZE
-#define MD4_DIGEST_LENGTH       16
+#define MD4_DIGEST_LENGTH       MD4_DIGEST_SIZE
+#define MD5_DIGEST_LENGTH       WC_MD5_DIGEST_SIZE
 
 /** Cipher should encrypt */
 #define OPENVPN_OP_ENCRYPT      1
