@@ -204,13 +204,140 @@ void tls_ctx_load_dh_params(struct tls_root_ctx *ctx, const char *dh_file,
 }
 
 void tls_ctx_load_ecdh_params(struct tls_root_ctx *ctx, const char *curve_name) {
-    if (curve_name != NULL) {
-        /* Use user supplied curve if given */
-        msg(D_TLS_DEBUG, "Using user specified ECDH curve (%s)", curve_name);
-        nid = OBJ_sn2nid(curve_name);
+    msg(M_FATAL, "wolfssl does not support tls_ctx_load_ecdh_params");
+    return;
+
+#if 0
+    int i;
+    word32 oidSum = 0;
+
+    if (curve_name == NULL) {
+        return;
+    }
+
+    msg(D_TLS_DEBUG, "Using user specified ECDH curve (%s)", curve_name);
+
+    /* find based on name */
+    for (i = 0; ecc_sets[i].id != ECC_CURVE_INVALID; i++) {
+        if (strncmp(curve_name, ecc_sets[i].name, ECC_MAXNAME) == 0) {
+            oidSum = ecc_sets[i].oidSum;
+        }
+    }
+
+    if (oidSum == 0) {
+        msg(M_FATAL, "Unknown curve name: %s", curve_name);
+    }
+
+    // ctx->ctx is an incomplete type
+    ctx->ctx->ecdhCurveOID = oidSum;
+#endif
+}
+
+int tls_ctx_load_pkcs12(struct tls_root_ctx *ctx, const char *pkcs12_file,
+                        const char *pkcs12_file_inline, bool load_ca_file) {
+    msg(M_FATAL, "NEEDS CHECKING OF INPUT FORMAT %s", __func__);
+
+#if 0
+    int ret;
+    ASSERT(ctx != NULL);
+
+    if (!strcmp(pkcs12_file, INLINE_FILE_TAG) && pkcs12_file_inline) {
+        /* PKCS12 in memory */
+    } else {
+        /* PKCS12 in file */
+    }
+
+    if ((ret = PemToDer(buf, sz, DH_PARAM_TYPE, &der, ctx->heap,
+                        NULL, NULL)) != 0) {
+
+    }
+#endif
+}
+
+#ifdef ENABLE_CRYPTOAPI
+void
+tls_ctx_load_cryptoapi(struct tls_root_ctx *ctx, const char *cryptoapi_cert)
+{
+    ASSERT(NULL != ctx);
+
+    /* Load Certificate and Private Key */
+    if (!SSL_CTX_use_CryptoAPI_certificate(ctx->ctx, cryptoapi_cert))
+    {
+        crypto_msg(M_FATAL, "Cannot load certificate \"%s\" from Microsoft Certificate Store", cryptoapi_cert);
+    }
+}
+#endif /* ENABLE_CRYPTOAPI */
+
+void tls_ctx_load_cert_file(struct tls_root_ctx *ctx, const char *cert_file,
+                            const char *cert_file_inline) {
+    int ret;
+    int cert_len;
+    ASSERT(ctx != NULL);
+
+    if (!strcmp(cert_file, INLINE_FILE_TAG) && cert_file_inline) {
+        /* Certificate in memory */
+        if ((cert_len = strlen(cert_file_inline)) == 0) {
+            msg(M_FATAL, "Empty certificate passed.");
+            return;
+        }
+
+        if ((ret = wolfSSL_CTX_load_verify_buffer(ctx->ctx,
+                                                  (uint8_t*) cert_file_inline,
+                                                  cert_len,
+                                                  SSL_FILETYPE_PEM)) != SSL_SUCCESS ) {
+            msg(M_FATAL, "wolfSSL_CTX_load_verify_buffer failed with Errno: %d", ret);
+            return;
+        }
+        if ((ret = wolfSSL_CTX_use_certificate_buffer(ctx->ctx,
+                                                      (uint8_t*) cert_file_inline,
+                                                      cert_len,
+                                                      SSL_FILETYPE_PEM)) != SSL_SUCCESS ) {
+            msg(M_FATAL, "wolfSSL_CTX_use_certificate_buffer failed with Errno: %d", ret);
+            return;
+        }
+    } else {
+        /* Certificate in file */
+        if ((ret = wolfSSL_CTX_load_verify_locations(ctx->ctx, cert_file, NULL)) != SSL_SUCCESS ) {
+            msg(M_FATAL, "wolfSSL_CTX_load_verify_locations failed with Errno: %d", ret);
+            return;
+        }
+        if ((ret = wolfSSL_CTX_use_certificate_chain_file(ctx->ctx, cert_file)) != SSL_SUCCESS ) {
+            msg(M_FATAL, "wolfSSL_CTX_use_certificate_chain_file failed with Errno: %d", ret);
+            return;
+        }
     }
 }
 
+int tls_ctx_load_priv_file(struct tls_root_ctx *ctx, const char *priv_key_file,
+                           const char *priv_key_file_inline) {
 
+    int ret;
+    int key_len;
+    ASSERT(ctx != NULL);
+
+    if (!strcmp(priv_key_file, INLINE_FILE_TAG) && priv_key_file_inline) {
+        /* Key in memory */
+        if ((key_len = strlen(priv_key_file_inline)) == 0) {
+            msg(M_FATAL, "Empty certificate passed.");
+            return 1;
+        }
+        if ((ret = wolfSSL_CTX_use_PrivateKey_buffer(ctx->ctx,
+                                                     (uint8_t*) priv_key_file_inline,
+                                                     key_len,
+                                                     WOLFSSL_FILETYPE_PEM)) != SSL_SUCCESS ) {
+            msg(M_FATAL, "wolfSSL_CTX_use_PrivateKey_buffer failed with Errno: %d", ret);
+            return 1;
+        }
+    } else {
+        /* Key in file */
+        if ((ret = wolfSSL_CTX_use_PrivateKey_file(ctx->ctx,
+                                                   priv_key_file,
+                                                   WOLFSSL_FILETYPE_PEM)) != SSL_SUCCESS ) {
+            msg(M_FATAL, "wolfSSL_CTX_use_PrivateKey_file failed with Errno: %d", ret);
+            return 1;
+        }
+    }
+    return 0;
+}
 
 #endif /* ENABLE_CRYPTO_WOLFSSL */
