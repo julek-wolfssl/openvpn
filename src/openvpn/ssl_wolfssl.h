@@ -30,12 +30,14 @@
 #define SSL_WOLFSSL_H_
 
 #include <wolfssl/wolfcrypt/settings.h>
+#include <wolfssl/wolfcrypt/asn.h>
 #include <wolfssl/ssl.h>
-#include <wolfssl/internal.h>
 
-# define TLS1_1_VERSION                  0x0302
-# define TLS1_2_VERSION                  0x0303
-# define TLS1_3_VERSION                  0x0304
+#define TLS1_1_VERSION                  0x0302
+#define TLS1_2_VERSION                  0x0303
+#define TLS1_3_VERSION                  0x0304
+
+#define MAX_DH_SIZE ((8192/8)+1)
 
 /**
  * Structure that wraps the TLS context. Contents differ depending on the

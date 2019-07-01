@@ -174,14 +174,7 @@ void tls_ctx_check_cert_time(const struct tls_root_ctx *ctx) {
 void tls_ctx_load_dh_params(struct tls_root_ctx *ctx, const char *dh_file,
                             const char *dh_file_inline) {
     msg(M_FATAL, "NEEDS TESTING %s", __func__);
-    int dh_len;
-    const char* cert;
-    byte*  p = NULL;
-    byte*  g = NULL;
-    word32 pSz = MAX_DH_SIZE;
-    word32 gSz = MAX_DH_SIZE;
-    DerBuffer der;
-    struct buffer cert_buf = {0};
+    int dh_len, ret;
 
     ASSERT(ctx != NULL);
 
@@ -191,32 +184,32 @@ void tls_ctx_load_dh_params(struct tls_root_ctx *ctx, const char *dh_file,
             msg(M_FATAL, "Empty DH parameters passed.");
             return;
         }
-        cert = dh_file_inline;
-    } else {
-        /* Parameters in file */
-        cert_buf = buffer_read_from_file(dh_file, NULL);
-        if (!BPTR(cert_buf)) {
-            msg(M_FATAL, "Failed to read file: %s", dh_file);
+
+        if ((ret = wolfSSL_CTX_SetTmpDH_buffer(ctx->ctx,
+                                               (uint8_t*) dh_file_inline,
+                                               dh_len,
+                                               WOLFSSL_FILETYPE_PEM)) != SSL_SUCCESS) {
+            msg(M_FATAL, "wolfSSL_CTX_SetTmpDH_buffer failed with Errno: %d", ret);
             return;
         }
-        cert = BPTR(cert_buf);
-        dh_len = BLEN(cert_buf);
-    }
-
-    if (PemToDer(cert, dh_len, DH_PARAM_TYPE, &der, NULL, NULL, NULL) != 0) {
-        if (BPTR(cert_buf)) {
-            free_buf(cert_buf);
+    } else {
+        /* Parameters in file */
+        if ((ret = wolfSSL_CTX_SetTmpDH_file(ctx->ctx,
+                                             dh_file,
+                                             WOLFSSL_FILETYPE_PEM)) != SSL_SUCCESS) {
+            msg(M_FATAL, "wolfSSL_CTX_SetTmpDH_file failed with Errno: %d", ret);
+            return;
         }
-        msg(M_FATAL, "Failed to read file: %s", dh_file);
-        return;
-    }
-
-    cleanup:
-    if (BPTR(cert_buf)) {
-        free_buf(cert_buf);
     }
 }
 
+void tls_ctx_load_ecdh_params(struct tls_root_ctx *ctx, const char *curve_name) {
+    if (curve_name != NULL) {
+        /* Use user supplied curve if given */
+        msg(D_TLS_DEBUG, "Using user specified ECDH curve (%s)", curve_name);
+        nid = OBJ_sn2nid(curve_name);
+    }
+}
 
 
 
