@@ -263,21 +263,20 @@ cleanup:
  * Generate strong cryptographic random numbers
  */
 int rand_bytes(uint8_t *output, int len) {
-    WC_RNG rng;
+    static WC_RNG rng;
+    static bool rng_init = false;
     int ret;
 
-    if ((ret = wc_InitRng(&rng)) != 0){
-        msg(D_CRYPT_ERRORS, "wc_InitRng failed Errno: %d", ret);
-        return 0;
+    if (!rng_init) {
+        if ((ret = wc_InitRng(&rng)) != 0){
+            msg(D_CRYPT_ERRORS, "wc_InitRng failed Errno: %d", ret);
+            return 0;
+        }
+        rng_init = true;
     }
 
     if ((ret = wc_RNG_GenerateBlock(&rng, output, len)) != 0){
         msg(D_CRYPT_ERRORS, "wc_RNG_GenerateBlock failed Errno: %d", ret);
-        return 0;
-    }
-
-    if ((ret = wc_FreeRng(&rng)) != 0){
-        msg(D_CRYPT_ERRORS, "wc_FreeRng failed Errno: %d", ret);
         return 0;
     }
 
@@ -544,35 +543,66 @@ int cipher_kt_key_size(const cipher_kt_t *cipher_kt) {
         return 0;
     }
     switch (*cipher_kt) {
+#ifdef HAVE_AES_CBC
     case OV_WC_AES_128_CBC_TYPE:
-    case OV_WC_AES_128_CTR_TYPE:
-    case OV_WC_AES_128_ECB_TYPE:
-    case OV_WC_AES_128_OFB_TYPE:
-    case OV_WC_AES_128_CFB_TYPE:
-    case OV_WC_AES_128_GCM_TYPE:
         return AES_128_KEY_SIZE;
     case OV_WC_AES_192_CBC_TYPE:
-    case OV_WC_AES_192_CTR_TYPE:
-    case OV_WC_AES_192_ECB_TYPE:
-    case OV_WC_AES_192_OFB_TYPE:
-    case OV_WC_AES_192_CFB_TYPE:
-    case OV_WC_AES_192_GCM_TYPE:
         return AES_192_KEY_SIZE;
     case OV_WC_AES_256_CBC_TYPE:
+        return AES_256_KEY_SIZE;
+#endif
+#ifdef WOLFSSL_AES_COUNTER
+    case OV_WC_AES_128_CTR_TYPE:
+        return AES_128_KEY_SIZE;
+    case OV_WC_AES_192_CTR_TYPE:
+        return AES_192_KEY_SIZE;
     case OV_WC_AES_256_CTR_TYPE:
+        return AES_256_KEY_SIZE;
+#endif
+#ifdef HAVE_AES_ECB
+    case OV_WC_AES_128_ECB_TYPE:
+        return AES_128_KEY_SIZE;
+    case OV_WC_AES_192_ECB_TYPE:
+        return AES_192_KEY_SIZE;
     case OV_WC_AES_256_ECB_TYPE:
+        return AES_256_KEY_SIZE;
+#endif
+#ifdef WOLFSSL_AES_DIRECT
+    case OV_WC_AES_128_OFB_TYPE:
+        return AES_128_KEY_SIZE;
+    case OV_WC_AES_192_OFB_TYPE:
+        return AES_192_KEY_SIZE;
     case OV_WC_AES_256_OFB_TYPE:
+        return AES_256_KEY_SIZE;
+#endif
+#ifdef WOLFSSL_AES_CFB
+    case OV_WC_AES_128_CFB_TYPE:
+        return AES_128_KEY_SIZE;
+    case OV_WC_AES_192_CFB_TYPE:
+        return AES_192_KEY_SIZE;
     case OV_WC_AES_256_CFB_TYPE:
+        return AES_256_KEY_SIZE;
+#endif
+#ifdef HAVE_AESGCM
+    case OV_WC_AES_128_GCM_TYPE:
+        return AES_128_KEY_SIZE;
+    case OV_WC_AES_192_GCM_TYPE:
+        return AES_192_KEY_SIZE;
     case OV_WC_AES_256_GCM_TYPE:
         return AES_256_KEY_SIZE;
+#endif
+#ifndef NO_DES3
     case OV_WC_DES_CBC_TYPE:
     case OV_WC_DES_ECB_TYPE:
         return DES_KEY_SIZE;
     case OV_WC_DES_EDE3_CBC_TYPE:
     case OV_WC_DES_EDE3_ECB_TYPE:
         return DES3_KEY_SIZE;
+#endif
+#if defined(HAVE_CHACHA) && defined(HAVE_POLY1305)
     case OV_WC_CHACHA20_POLY1305_TYPE:
         return CHACHA20_POLY1305_AEAD_KEYSIZE;
+#endif
     case OV_WC_NULL_CIPHER_TYPE:
         return 0;
     }
@@ -584,32 +614,50 @@ int cipher_kt_iv_size(const cipher_kt_t *cipher_kt) {
         return 0;
     }
     switch (*cipher_kt) {
+#ifdef HAVE_AES_CBC
     case OV_WC_AES_128_CBC_TYPE:
     case OV_WC_AES_192_CBC_TYPE:
     case OV_WC_AES_256_CBC_TYPE:
+#endif
+#ifdef WOLFSSL_AES_COUNTER
     case OV_WC_AES_128_CTR_TYPE:
     case OV_WC_AES_192_CTR_TYPE:
     case OV_WC_AES_256_CTR_TYPE:
+#endif
+#ifdef HAVE_AES_ECB
     case OV_WC_AES_128_ECB_TYPE:
     case OV_WC_AES_192_ECB_TYPE:
     case OV_WC_AES_256_ECB_TYPE:
+#endif
+#ifdef WOLFSSL_AES_DIRECT
     case OV_WC_AES_128_OFB_TYPE:
     case OV_WC_AES_192_OFB_TYPE:
     case OV_WC_AES_256_OFB_TYPE:
+#endif
+#ifdef WOLFSSL_AES_CFB
     case OV_WC_AES_128_CFB_TYPE:
     case OV_WC_AES_192_CFB_TYPE:
     case OV_WC_AES_256_CFB_TYPE:
+#endif
+#ifdef HAVE_AESGCM
     case OV_WC_AES_128_GCM_TYPE:
     case OV_WC_AES_192_GCM_TYPE:
     case OV_WC_AES_256_GCM_TYPE:
+#endif
+#if defined(HAVE_AES_CBC) || defined(WOLFSSL_AES_COUNTER) || defined(HAVE_AES_ECB) || defined(WOLFSSL_AES_DIRECT) || defined(WOLFSSL_AES_CFB) || defined(HAVE_AESGCM)
         return AES_BLOCK_SIZE;
+#endif
+#ifndef NO_DES3
     case OV_WC_DES_CBC_TYPE:
     case OV_WC_DES_ECB_TYPE:
     case OV_WC_DES_EDE3_CBC_TYPE:
     case OV_WC_DES_EDE3_ECB_TYPE:
         return DES_BLOCK_SIZE;
+#endif
+#if defined(HAVE_CHACHA) && defined(HAVE_POLY1305)
     case OV_WC_CHACHA20_POLY1305_TYPE:
         return CHACHA20_POLY1305_AEAD_IV_SIZE;
+#endif
     case OV_WC_NULL_CIPHER_TYPE:
         return 0;
     }
@@ -621,31 +669,51 @@ static bool needs_padding(const cipher_kt_t *cipher_kt) {
         return false;
     }
     switch (*cipher_kt) {
+#ifdef HAVE_AES_CBC
     case OV_WC_AES_128_CBC_TYPE:
     case OV_WC_AES_192_CBC_TYPE:
     case OV_WC_AES_256_CBC_TYPE:
+#endif
+#ifdef HAVE_AES_ECB
     case OV_WC_AES_128_ECB_TYPE:
     case OV_WC_AES_192_ECB_TYPE:
     case OV_WC_AES_256_ECB_TYPE:
+#endif
+#ifdef HAVE_AESGCM
     case OV_WC_AES_128_GCM_TYPE:
     case OV_WC_AES_192_GCM_TYPE:
     case OV_WC_AES_256_GCM_TYPE:
+#endif
+#ifndef NO_DES3
     case OV_WC_DES_CBC_TYPE:
     case OV_WC_DES_ECB_TYPE:
     case OV_WC_DES_EDE3_CBC_TYPE:
     case OV_WC_DES_EDE3_ECB_TYPE:
+#endif
+#if defined(HAVE_AES_CBC) || defined(HAVE_AES_ECB) || defined(HAVE_AESGCM) || !defined(NO_DES3)
         return true;
+#endif
+#ifdef WOLFSSL_AES_DIRECT
     case OV_WC_AES_128_OFB_TYPE:
     case OV_WC_AES_192_OFB_TYPE:
     case OV_WC_AES_256_OFB_TYPE:
+#endif
+#ifdef WOLFSSL_AES_CFB
     case OV_WC_AES_128_CFB_TYPE:
     case OV_WC_AES_192_CFB_TYPE:
     case OV_WC_AES_256_CFB_TYPE:
+#endif
+#ifdef WOLFSSL_AES_COUNTER
     case OV_WC_AES_128_CTR_TYPE:
     case OV_WC_AES_192_CTR_TYPE:
     case OV_WC_AES_256_CTR_TYPE:
+#endif
+#if defined(HAVE_CHACHA) && defined(HAVE_POLY1305)
     case OV_WC_CHACHA20_POLY1305_TYPE:
+#endif
+#if defined(WOLFSSL_AES_DIRECT) || defined(WOLFSSL_AES_CFB) || defined(WOLFSSL_AES_COUNTER) || (defined(HAVE_CHACHA) && defined(HAVE_POLY1305))
         return false;
+#endif
     case OV_WC_NULL_CIPHER_TYPE:
         return false;
     }
@@ -657,32 +725,51 @@ int cipher_kt_block_size(const cipher_kt_t *cipher_kt) {
         return 0;
     }
     switch (*cipher_kt) {
+
+#ifdef HAVE_AES_CBC
     case OV_WC_AES_128_CBC_TYPE:
     case OV_WC_AES_192_CBC_TYPE:
     case OV_WC_AES_256_CBC_TYPE:
+#endif
+#ifdef WOLFSSL_AES_COUNTER
     case OV_WC_AES_128_CTR_TYPE:
     case OV_WC_AES_192_CTR_TYPE:
     case OV_WC_AES_256_CTR_TYPE:
+#endif
+#ifdef HAVE_AES_ECB
     case OV_WC_AES_128_ECB_TYPE:
     case OV_WC_AES_192_ECB_TYPE:
     case OV_WC_AES_256_ECB_TYPE:
+#endif
+#ifdef WOLFSSL_AES_DIRECT
     case OV_WC_AES_128_OFB_TYPE:
     case OV_WC_AES_192_OFB_TYPE:
     case OV_WC_AES_256_OFB_TYPE:
+#endif
+#ifdef WOLFSSL_AES_CFB
     case OV_WC_AES_128_CFB_TYPE:
     case OV_WC_AES_192_CFB_TYPE:
     case OV_WC_AES_256_CFB_TYPE:
+#endif
+#ifdef HAVE_AESGCM
     case OV_WC_AES_128_GCM_TYPE:
     case OV_WC_AES_192_GCM_TYPE:
     case OV_WC_AES_256_GCM_TYPE:
+#endif
+#if defined(HAVE_AES_CBC) || defined(WOLFSSL_AES_COUNTER) || defined(HAVE_AES_ECB) || defined(WOLFSSL_AES_DIRECT) || defined(WOLFSSL_AES_CFB) || defined(HAVE_AESGCM)
         return AES_BLOCK_SIZE;
+#endif
+#ifndef NO_DES3
     case OV_WC_DES_CBC_TYPE:
     case OV_WC_DES_ECB_TYPE:
     case OV_WC_DES_EDE3_CBC_TYPE:
     case OV_WC_DES_EDE3_ECB_TYPE:
         return DES_BLOCK_SIZE;
+#endif
+#if defined(HAVE_CHACHA) && defined(HAVE_POLY1305)
     case OV_WC_CHACHA20_POLY1305_TYPE:
         return CHACHA_CHUNK_BYTES;
+#endif
     case OV_WC_NULL_CIPHER_TYPE:
         return 0;
     }
@@ -825,18 +912,27 @@ static int wolfssl_ctx_init(cipher_ctx_t *ctx, const uint8_t *key, int key_len, 
 
     switch (*kt) {
     /* SETUP AES */
+#ifdef HAVE_AES_CBC
     case OV_WC_AES_128_CBC_TYPE:
-    case OV_WC_AES_128_ECB_TYPE:
-    case OV_WC_AES_128_OFB_TYPE:
-    case OV_WC_AES_128_CFB_TYPE:
     case OV_WC_AES_192_CBC_TYPE:
-    case OV_WC_AES_192_ECB_TYPE:
-    case OV_WC_AES_192_OFB_TYPE:
-    case OV_WC_AES_192_CFB_TYPE:
     case OV_WC_AES_256_CBC_TYPE:
+#endif
+#ifdef HAVE_AES_ECB
+    case OV_WC_AES_128_ECB_TYPE:
+    case OV_WC_AES_192_ECB_TYPE:
     case OV_WC_AES_256_ECB_TYPE:
+#endif
+#ifdef WOLFSSL_AES_DIRECT
+    case OV_WC_AES_128_OFB_TYPE:
+    case OV_WC_AES_192_OFB_TYPE:
     case OV_WC_AES_256_OFB_TYPE:
+#endif
+#ifdef WOLFSSL_AES_CFB
+    case OV_WC_AES_128_CFB_TYPE:
+    case OV_WC_AES_192_CFB_TYPE:
     case OV_WC_AES_256_CFB_TYPE:
+#endif
+#if defined(HAVE_AES_CBC) || defined(HAVE_AES_ECB) || defined(WOLFSSL_AES_DIRECT) || defined(WOLFSSL_AES_CFB)
         if (key) {
             if ((ret = wc_AesSetKey(
                     &ctx->cipher.aes, key, key_len, iv,
@@ -853,6 +949,8 @@ static int wolfssl_ctx_init(cipher_ctx_t *ctx, const uint8_t *key, int key_len, 
             }
         }
         break;
+#endif
+#ifdef WOLFSSL_AES_COUNTER
     case OV_WC_AES_128_CTR_TYPE:
     case OV_WC_AES_192_CTR_TYPE:
     case OV_WC_AES_256_CTR_TYPE:
@@ -871,7 +969,8 @@ static int wolfssl_ctx_init(cipher_ctx_t *ctx, const uint8_t *key, int key_len, 
             }
         }
         break;
-        break;
+#endif
+#ifdef HAVE_AESGCM
     case OV_WC_AES_128_GCM_TYPE:
     case OV_WC_AES_192_GCM_TYPE:
     case OV_WC_AES_256_GCM_TYPE:
@@ -885,6 +984,8 @@ static int wolfssl_ctx_init(cipher_ctx_t *ctx, const uint8_t *key, int key_len, 
             memcpy(&ctx->iv, iv, AES_BLOCK_SIZE);
         }
         break;
+#endif
+#ifndef NO_DES3
     case OV_WC_DES_CBC_TYPE:
     case OV_WC_DES_ECB_TYPE:
         if (key) {
@@ -918,12 +1019,15 @@ static int wolfssl_ctx_init(cipher_ctx_t *ctx, const uint8_t *key, int key_len, 
             }
         }
         break;
+#endif
+#if defined(HAVE_CHACHA) && defined(HAVE_POLY1305)
     case OV_WC_CHACHA20_POLY1305_TYPE:
         ASSERT(CHACHA20_POLY1305_AEAD_AUTHTAG_SIZE == OPENVPN_AEAD_TAG_LENGTH);
         if (iv) {
             memcpy(ctx->iv.chacha20_poly1305, iv, CHACHA20_POLY1305_AEAD_IV_SIZE);
         }
         break;
+#endif
     case OV_WC_NULL_CIPHER_TYPE:
         return 0;
     }
@@ -1055,6 +1159,7 @@ static int wolfssl_ctx_update_blocks(cipher_ctx_t *ctx, uint8_t *dst, int *dst_l
     }
 
     switch (ctx->cipher_type) {
+#ifdef HAVE_AES_CBC
     case OV_WC_AES_128_CBC_TYPE:
     case OV_WC_AES_192_CBC_TYPE:
     case OV_WC_AES_256_CBC_TYPE:
@@ -1070,6 +1175,8 @@ static int wolfssl_ctx_update_blocks(cipher_ctx_t *ctx, uint8_t *dst, int *dst_l
             }
         }
         break;
+#endif
+#ifdef WOLFSSL_AES_COUNTER
     case OV_WC_AES_128_CTR_TYPE:
     case OV_WC_AES_192_CTR_TYPE:
     case OV_WC_AES_256_CTR_TYPE:
@@ -1079,28 +1186,32 @@ static int wolfssl_ctx_update_blocks(cipher_ctx_t *ctx, uint8_t *dst, int *dst_l
             return 0;
         }
         break;
+#endif
+#ifdef HAVE_AES_ECB
     case OV_WC_AES_128_ECB_TYPE:
     case OV_WC_AES_192_ECB_TYPE:
     case OV_WC_AES_256_ECB_TYPE:
         msg(M_FATAL, "ECB not yet implemented");
         break;
+#endif
+#ifdef WOLFSSL_AES_DIRECT
     case OV_WC_AES_128_OFB_TYPE:
     case OV_WC_AES_192_OFB_TYPE:
     case OV_WC_AES_256_OFB_TYPE:
         msg(M_FATAL, "OFB needs to be tested");
         /* encryption and decryption are the same for OFB */
-        uint8_t zero_in[AES_BLOCK_SIZE] = {0};
         uint8_t out_buf[AES_BLOCK_SIZE];
         for (i = 0; i < src_len; i += AES_BLOCK_SIZE) {
-            if ((ret = wc_AesCfbEncrypt(&ctx->cipher.aes, out_buf, zero_in, AES_BLOCK_SIZE)) != 0) {
-                msg(M_FATAL, "wc_AesCfbEncrypt failed with Errno: %d", ret);
-                return 0;
-            }
-            for (j = 0; j < AES_BLOCK_SIZE; j++) {
-                dst[i + j] = out_buf[j] ^ src[i + j];
+            wc_AesEncryptDirect(&ctx->cipher.aes, out_buf, (byte*)ctx->cipher.aes.reg);
+            memcpy(ctx->cipher.aes.reg, out_buf, AES_BLOCK_SIZE);
+
+            for (j = i; j < MIN(i + AES_BLOCK_SIZE, src_len); j++) {
+                dst[j] = out_buf[j - i] ^ src[j];
             }
         }
         break;
+#endif
+#ifdef WOLFSSL_AES_CFB
     case OV_WC_AES_128_CFB_TYPE:
     case OV_WC_AES_192_CFB_TYPE:
     case OV_WC_AES_256_CFB_TYPE:
@@ -1116,6 +1227,8 @@ static int wolfssl_ctx_update_blocks(cipher_ctx_t *ctx, uint8_t *dst, int *dst_l
             }
         }
         break;
+#endif
+#ifdef HAVE_AESGCM
     case OV_WC_AES_128_GCM_TYPE:
     case OV_WC_AES_192_GCM_TYPE:
     case OV_WC_AES_256_GCM_TYPE:
@@ -1164,6 +1277,8 @@ static int wolfssl_ctx_update_blocks(cipher_ctx_t *ctx, uint8_t *dst, int *dst_l
         }
         ctx->aead_updated = true;
         break;
+#endif
+#ifndef NO_DES3
     case OV_WC_DES_CBC_TYPE:
         if (ctx->enc == OV_WC_ENCRYPT) {
             if ((ret = wc_Des_CbcEncrypt(&ctx->cipher.des, dst, src, src_len)) != 0) {
@@ -1194,6 +1309,8 @@ static int wolfssl_ctx_update_blocks(cipher_ctx_t *ctx, uint8_t *dst, int *dst_l
     case OV_WC_DES_EDE3_ECB_TYPE:
         msg(M_FATAL, "ECB not yet implemented");
         break;
+#endif
+#if defined(HAVE_CHACHA) && defined(HAVE_POLY1305)
     case OV_WC_CHACHA20_POLY1305_TYPE:
         if (ctx->aead_updated) {
             msg(M_FATAL, "AEAD ALGORITHMS MAY ONLY CALL UPDATE ONCE");
@@ -1221,6 +1338,7 @@ static int wolfssl_ctx_update_blocks(cipher_ctx_t *ctx, uint8_t *dst, int *dst_l
         }
         ctx->aead_updated = true;
         break;
+#endif
     case OV_WC_NULL_CIPHER_TYPE:
         return 0;
     }
@@ -1318,10 +1436,11 @@ int cipher_ctx_update(cipher_ctx_t *ctx, uint8_t *dst, int *dst_len,
  * Pads the buffer of the cipher context with PKCS#7 padding
  */
 static void pad_block(cipher_ctx_t *ctx) {
-    int i, block_size;
+    int i, block_size, n;
     block_size = cipher_kt_block_size(&ctx->cipher_type);
+    n = block_size - ctx->buf_used;
     for (i = ctx->buf_used; i < block_size; i++) {
-        ((uint8_t*)&(ctx->buf))[i] = (uint8_t)(block_size - ctx->buf_used);
+        ((uint8_t*)&(ctx->buf))[i] = (uint8_t)(n);
     }
 }
 
@@ -1372,7 +1491,7 @@ static int wolfssl_ctx_final(cipher_ctx_t *ctx, uint8_t *dst, int *dst_len) {
                                           block_size) != 1) {
                 return 0;
             }
-        } else {
+        } else if (needs_padding(&ctx->cipher_type)) {
             if (ctx->buf_used != 0) {
                 *dst_len = 0;
                 msg(M_FATAL, "%s: not enough padding for decrypt", __func__);
@@ -1466,9 +1585,11 @@ const md_kt_t *md_kt_get(const char *digest) {
 
     for (digest_ = digest_tbl; digest_->name != NULL; digest_++) {
         if(strncmp(digest, digest_->name, strlen(digest_->name)+1) == 0) {
+#ifndef NO_MD4
             if (digest_->type == OV_WC_MD4) {
                 msg(M_FATAL, "MD4 not supported in wolfssl generic functions.");
             }
+#endif
             return &digest_static[digest_->type];
         }
     }
