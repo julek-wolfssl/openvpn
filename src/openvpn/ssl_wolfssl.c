@@ -46,6 +46,12 @@
 #include "ssl_verify_wolfssl.h"
 #include "base64.h"
 
+/*
+ *
+ * Functions used in ssl.c which must be implemented by the backend SSL library
+ *
+ */
+
 void tls_init_lib(void) {
 	int ret;
 	if ((ret = wolfSSL_Init()) != SSL_SUCCESS) {
@@ -252,6 +258,7 @@ int tls_ctx_load_pkcs12(struct tls_root_ctx *ctx, const char *pkcs12_file,
 
     }
 #endif
+    return 1;
 }
 
 #ifdef ENABLE_CRYPTOAPI
@@ -288,10 +295,9 @@ void tls_ctx_load_cert_file(struct tls_root_ctx *ctx, const char *cert_file,
             msg(M_FATAL, "wolfSSL_CTX_load_verify_buffer failed with Errno: %d", ret);
             return;
         }
-        if ((ret = wolfSSL_CTX_use_certificate_buffer(ctx->ctx,
-                                                      (uint8_t*) cert_file_inline,
-                                                      cert_len,
-                                                      SSL_FILETYPE_PEM)) != SSL_SUCCESS ) {
+        if ((ret = wolfSSL_CTX_use_certificate_chain_buffer(ctx->ctx,
+                                                            (uint8_t*) cert_file_inline,
+                                                            cert_len)) != SSL_SUCCESS ) {
             msg(M_FATAL, "wolfSSL_CTX_use_certificate_buffer failed with Errno: %d", ret);
             return;
         }
@@ -338,6 +344,121 @@ int tls_ctx_load_priv_file(struct tls_root_ctx *ctx, const char *priv_key_file,
         }
     }
     return 0;
+}
+
+#ifdef ENABLE_MANAGEMENT
+int tls_ctx_use_management_external_key(struct tls_root_ctx *ctx) {
+    msg(M_FATAL, "NOT IMPLEMENTED %s", __func__);
+    return 1;
+}
+#endif /* ENABLE_MANAGEMENT */
+
+void tls_ctx_load_ca(struct tls_root_ctx *ctx, const char *ca_file,
+                     const char *ca_file_inline, const char *ca_path, bool tls_server) {
+    int ca_len, ret;
+
+    ASSERT(ctx != NULL);
+
+    if (!strcmp(ca_file, INLINE_FILE_TAG) && ca_file_inline) {
+        /* Certificate in memory */
+        if ((ca_len = strlen(ca_file_inline)) == 0) {
+            msg(M_FATAL, "Empty certificate passed.");
+            return;
+        }
+
+        if ((ret = wolfSSL_CTX_load_verify_buffer(ctx->ctx,
+                                                  (uint8_t*) ca_file_inline,
+                                                  ca_len,
+                                                  SSL_FILETYPE_PEM)) != SSL_SUCCESS ) {
+            msg(M_FATAL, "wolfSSL_CTX_load_verify_buffer failed with Errno: %d", ret);
+            return;
+        }
+        if ((ret = wolfSSL_CTX_use_certificate_chain_buffer(ctx->ctx,
+                                                            (uint8_t*) ca_file_inline,
+                                                            ca_len)) != SSL_SUCCESS ) {
+            msg(M_FATAL, "wolfSSL_CTX_use_certificate_buffer failed with Errno: %d", ret);
+            return;
+        }
+    } else {
+        /* Certificate in file */
+        if ((ret = wolfSSL_CTX_load_verify_locations(ctx->ctx, ca_file, NULL)) != SSL_SUCCESS ) {
+            msg(M_FATAL, "wolfSSL_CTX_load_verify_locations failed with Errno: %d", ret);
+            return;
+        }
+        if ((ret = wolfSSL_CTX_use_certificate_chain_file(ctx->ctx, ca_file)) != SSL_SUCCESS ) {
+            msg(M_FATAL, "wolfSSL_CTX_use_certificate_chain_file failed with Errno: %d", ret);
+            return;
+        }
+    }
+
+    if (ca_path) {
+        if ((ret = wolfSSL_CTX_load_verify_locations(ctx->ctx, NULL, ca_path)) != SSL_SUCCESS ) {
+            msg(M_FATAL, "wolfSSL_CTX_load_verify_locations failed with Errno: %d", ret);
+            return;
+        }
+    }
+}
+
+void tls_ctx_load_extra_certs(struct tls_root_ctx *ctx, const char *extra_certs_file,
+                              const char *extra_certs_file_inline) {
+    int extra_cert_len, ret;
+
+    ASSERT(ctx != NULL);
+
+    if (!strcmp(extra_certs_file, INLINE_FILE_TAG) && extra_certs_file_inline) {
+        /* Certificate in memory */
+        if ((extra_cert_len = strlen(extra_certs_file_inline)) == 0) {
+            msg(M_FATAL, "Empty certificate passed.");
+            return;
+        }
+
+        if ((ret = wolfSSL_CTX_use_certificate_chain_buffer(ctx->ctx,
+                                                            (uint8_t*) extra_certs_file_inline,
+                                                            extra_cert_len)) != SSL_SUCCESS ) {
+            msg(M_FATAL, "wolfSSL_CTX_use_certificate_buffer failed with Errno: %d", ret);
+            return;
+        }
+    } else {
+        /* Certificate in file */
+        if ((ret = wolfSSL_CTX_use_certificate_chain_file(ctx->ctx, extra_certs_file)) != SSL_SUCCESS ) {
+            msg(M_FATAL, "wolfSSL_CTX_use_certificate_chain_file failed with Errno: %d", ret);
+            return;
+        }
+    }
+}
+
+/* **************************************
+ *
+ * Key-state specific functions
+ *
+ * **************************************/
+
+void key_state_ssl_init(struct key_state_ssl *ks_ssl,
+                        const struct tls_root_ctx *ssl_ctx, bool is_server,
+                        struct tls_session *session) {
+    ASSERT(ssl_ctx != NULL);
+
+    if((ks_ssl->ssl = wolfSSL_new(ssl_ctx->ctx)) == NULL) {
+        msg(M_FATAL, "wolfSSL_new failed");
+    }
+
+    ks_ssl->session = session;
+}
+
+void key_state_ssl_free(struct key_state_ssl *ks_ssl) {
+    wolfSSL_free(ks_ssl->ssl);
+    ks_ssl->session = NULL;
+}
+
+void backend_tls_ctx_reload_crl(struct tls_root_ctx *ssl_ctx,
+                                const char *crl_file, const char *crl_inline) {
+    msg(M_FATAL, "NOT IMPLEMENTED %s", __func__);
+}
+
+void
+key_state_export_keying_material(struct key_state_ssl *ks_ssl,
+                                 struct tls_session *session) {
+    msg(M_WARN, "NOT IMPLEMENTED %s", __func__);
 }
 
 #endif /* ENABLE_CRYPTO_WOLFSSL */

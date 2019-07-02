@@ -53,6 +53,7 @@ struct tls_root_ctx {
 
 struct key_state_ssl {
     WOLFSSL *ssl;
+    struct tls_session *session;
 };
 
 #endif /* SSL_WOLFSSL_H_ */
