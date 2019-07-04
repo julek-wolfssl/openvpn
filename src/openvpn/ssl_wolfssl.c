@@ -433,6 +433,65 @@ void tls_ctx_load_extra_certs(struct tls_root_ctx *ctx, const char *extra_certs_
  *
  * **************************************/
 
+/*
+ * SSL is handled by library (wolfSSL in this case) but data is dumped
+ * to buffers instead of being sent directly through TCP sockets. OpenVPN
+ * itself handles sending and receiving data.
+ */
+
+static int ssl_buff_read(WOLFSSL *ssl, char *buf, int sz, void *ctx) {
+    struct ring_buffer_t* ssl_buf = (struct ring_buffer_t*)ctx;
+    uint32_t len = sz < ssl_buf->len ? sz : ssl_buf->len;
+
+    if (len == 0) {
+        return 0;
+    }
+
+    if (ssl_buf->offset + len <= RING_BUF_LEN) {
+        /* The data to be read does not wrap around the edge of the buffer */
+        memcpy(buf, ssl_buf->buf + ssl_buf->offset, len);
+    } else {
+        /* The data wraps around the end to the beginning of the buffer */
+        uint32_t partial_len = RING_BUF_LEN - ssl_buf->offset;
+        memcpy(buf, ssl_buf->buf + ssl_buf->offset, partial_len);
+        memcpy(buf + partial_len, ssl_buf->buf, len - partial_len);
+    }
+    ssl_buf->offset += len;
+    ssl_buf->offset %= RING_BUF_LEN;
+    ssl_buf->len -= len;
+
+    return len;
+}
+static int ssl_buff_write(WOLFSSL *ssl, char *buf, int sz, void *ctx) {
+    struct ring_buffer_t* ssl_buf = (struct ring_buffer_t*)ctx;
+    uint32_t len = sz;
+
+    if (len == 0) {
+        return 0;
+    }
+
+    if (len > RING_BUF_LEN) {
+        msg(M_FATAL, "Ring buffer is too small to hold all data.");
+    }
+
+    if (ssl_buf->len + len <= RING_BUF_LEN) {
+        return WOLFSSL_CBIO_ERR_WANT_WRITE;
+    }
+
+    if (ssl_buf->offset + ssl_buf->len + len < RING_BUF_LEN) {
+        /* The data to be sent will not wrap around the edge of the buffer */
+        memcpy(ssl_buf->buf + ssl_buf->offset + ssl_buf->len, buf, len);
+    } else {
+        /* The data will wrap around the end to the beginning of the buffer */
+        uint32_t partial_len = RING_BUF_LEN - (ssl_buf->offset + ssl_buf->len);
+        memcpy(ssl_buf->buf + ssl_buf->offset + ssl_buf->len, buf, partial_len);
+        memcpy(ssl_buf->buf, buf + partial_len, len - partial_len);
+    }
+    ssl_buf->len += len;
+
+    return len;
+}
+
 void key_state_ssl_init(struct key_state_ssl *ks_ssl,
                         const struct tls_root_ctx *ssl_ctx, bool is_server,
                         struct tls_session *session) {
@@ -442,11 +501,44 @@ void key_state_ssl_init(struct key_state_ssl *ks_ssl,
         msg(M_FATAL, "wolfSSL_new failed");
     }
 
+    if ((ks_ssl->send_buf =
+            (struct ring_buffer_t*) calloc(sizeof(struct ring_buffer_t), 1)) == NULL) {
+        wolfSSL_free(ks_ssl->ssl);
+        msg(M_FATAL, "Failed to allocate memory for send buffer.");
+    }
+
+    if ((ks_ssl->recv_buf =
+            (struct ring_buffer_t*) calloc(sizeof(struct ring_buffer_t), 1)) == NULL) {
+        free(ks_ssl->send_buf);
+        wolfSSL_free(ks_ssl->ssl);
+        msg(M_FATAL, "Failed to allocate memory for receive buffer.");
+    }
+
+    /* Register functions handling queuing of data in buffers */
+    wolfSSL_SSLSetIORecv(ks_ssl->ssl, &ssl_buff_read);
+    wolfSSL_SSLSetIOSend(ks_ssl->ssl, &ssl_buff_write);
+
+    /* Register pointers to appropriate buffers */
+    wolfSSL_SetIOWriteCtx(ks_ssl->ssl, ks_ssl->send_buf);
+    wolfSSL_SetIOReadCtx(ks_ssl->ssl, ks_ssl->recv_buf);
+
+    /* Set non blocking mode so that wolfSSL_write won't lock up when ring buffer is full */
+    wolfSSL_set_using_nonblock(ks_ssl->ssl, 1);
+
     ks_ssl->session = session;
 }
 
 void key_state_ssl_free(struct key_state_ssl *ks_ssl) {
     wolfSSL_free(ks_ssl->ssl);
+    if (ks_ssl->recv_buf) {
+        free(ks_ssl->recv_buf);
+    }
+    if (ks_ssl->send_buf) {
+        free(ks_ssl->send_buf);
+    }
+    ks_ssl->ssl = NULL;
+    ks_ssl->recv_buf = NULL;
+    ks_ssl->send_buf = NULL;
     ks_ssl->session = NULL;
 }
 
@@ -455,10 +547,135 @@ void backend_tls_ctx_reload_crl(struct tls_root_ctx *ssl_ctx,
     msg(M_FATAL, "NOT IMPLEMENTED %s", __func__);
 }
 
-void
-key_state_export_keying_material(struct key_state_ssl *ks_ssl,
+void key_state_export_keying_material(struct key_state_ssl *ks_ssl,
                                  struct tls_session *session) {
     msg(M_WARN, "NOT IMPLEMENTED %s", __func__);
 }
+
+
+int key_state_write_plaintext(struct key_state_ssl *ks_ssl, struct buffer *buf) {
+    int ret = 1;
+    perf_push(PERF_BIO_WRITE_PLAINTEXT);
+
+    ASSERT(ks_ssl != NULL);
+
+    switch (key_state_write_plaintext_const(ks_ssl, BPTR(buf), BLEN(buf))) {
+    case 1:
+        ret = 1;
+        memset(BPTR(buf), 0, BLEN(buf));  /* erase data just written */
+        buf->len = 0;
+        break;
+    case 0:
+        ret = 0;
+        break;
+    case -1:
+        ret = -1;
+        break;
+    default:
+        msg(M_WARN, "Invalid error code from key_state_write_plaintext_const");
+        break;
+    }
+
+    perf_pop();
+    return ret;
+}
+
+
+int key_state_write_plaintext_const(struct key_state_ssl *ks_ssl,
+                                    const uint8_t *data, int len) {
+    int err = 0;
+    int ret = 1;
+    perf_push(PERF_BIO_WRITE_PLAINTEXT);
+
+    ASSERT(ks_ssl != NULL);
+
+    if (len > 0) {
+        if ((err = wolfSSL_write(ks_ssl->ssl, data, len)) != len) {
+            if (wolfSSL_want_write(ks_ssl->ssl)) {
+                /* Call again later when the buffer is freed up */
+                ret = 0;
+                goto cleanup;
+            } else {
+                msg(M_WARN, "wolfSSL_write failed with Errno: %d",
+                    wolfSSL_get_error(ks_ssl->ssl, err));
+                ret =  -1;
+                goto cleanup;
+            }
+        }
+    }
+
+cleanup:
+    perf_pop();
+    return ret;
+}
+
+int key_state_read_ciphertext(struct key_state_ssl *ks_ssl, struct buffer *buf,
+                              int maxlen) {
+    int ret = 1;
+    perf_push(PERF_BIO_READ_CIPHERTEXT);
+
+    if (BLEN(buf) != 0) {
+        ret = 0;
+        goto cleanup;
+    }
+
+    ASSERT(ks_ssl != NULL);
+
+    buf->len = ssl_buff_read(ks_ssl->ssl, (char*)BPTR(buf), maxlen, ks_ssl->send_buf);
+
+    ret = buf->len > 0 ? 1 : 0;
+
+cleanup:
+    perf_pop();
+    return ret;
+}
+
+
+int key_state_write_ciphertext(struct key_state_ssl *ks_ssl,
+                               struct buffer *buf) {
+    int err, ret = 1;
+    perf_push(PERF_BIO_WRITE_CIPHERTEXT);
+
+    ASSERT(ks_ssl != NULL);
+
+    if (BLEN(buf) > 0) {
+        if ((err = (ssl_buff_write(ks_ssl->ssl, (char*) BPTR(buf),
+                                   BLEN(buf), ks_ssl->recv_buf))) != BLEN(buf)) {
+            ret = 0;
+            goto cleanup;
+        }
+        memset(BPTR(buf), 0, BLEN(buf));  /* erase data just written */
+        buf->len = 0;
+    }
+
+cleanup:
+    perf_pop();
+    return ret;
+}
+
+int key_state_read_plaintext(struct key_state_ssl *ks_ssl, struct buffer *buf,
+                             int maxlen) {
+    int err, ret = 1;
+    perf_push(PERF_BIO_READ_PLAINTEXT);
+
+    ASSERT(ks_ssl != NULL);
+
+    if (BLEN(buf) != 0) {
+        ret = 0;
+        goto cleanup;
+    }
+
+    if ((err = wolfSSL_read(ks_ssl->ssl, BPTR(buf), maxlen)) < 0) {
+        msg(M_WARN, "wolfSSL_write failed with Errno: %d",
+            wolfSSL_get_error(ks_ssl->ssl, err));
+        ret =  -1;
+        goto cleanup;
+    }
+
+cleanup:
+    perf_pop();
+    return ret;
+}
+
 
 #endif /* ENABLE_CRYPTO_WOLFSSL */

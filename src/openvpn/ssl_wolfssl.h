@@ -41,6 +41,14 @@
 
 #define MAX_DH_SIZE ((8192/8)+1)
 
+#define RING_BUF_LEN (1024*30)
+
+struct ring_buffer_t {
+    uint8_t buf[RING_BUF_LEN];
+    uint32_t len;
+    uint32_t offset;
+};
+
 /**
  * Structure that wraps the TLS context. Contents differ depending on the
  * SSL library used.
@@ -53,6 +61,8 @@ struct tls_root_ctx {
 
 struct key_state_ssl {
     WOLFSSL *ssl;
+    struct ring_buffer_t *send_buf;
+    struct ring_buffer_t *recv_buf;
     struct tls_session *session;
 };
 
