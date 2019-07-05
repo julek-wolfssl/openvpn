@@ -677,5 +677,48 @@ cleanup:
     return ret;
 }
 
+void print_details(struct key_state_ssl *ks_ssl, const char *prefix) {
+    msg(M_WARN, "NOT IMPLEMENTED %s", __func__);
+}
+
+void show_available_tls_ciphers_list(const char *cipher_list,
+                                     const char *tls_cert_profile,
+                                     bool tls13) {
+    msg(M_WARN, "NOT IMPLEMENTED %s", __func__);
+}
+
+void show_available_curves(void) {
+    msg(M_WARN, "NOT IMPLEMENTED %s", __func__);
+}
+
+void get_highest_preference_tls_cipher(char *buf, int size) {
+    WOLFSSL *ssl;
+    WOLFSSL_CTX* ctx;
+    const char* cipher_name;
+
+    if ((ctx = wolfSSL_CTX_new(wolfTLSv1_2_client_method())) == NULL){
+        wolfSSL_CTX_free(ctx);
+        msg(M_FATAL, "wolfSSL_CTX_new failed");
+    }
+
+    if((ssl = wolfSSL_new(ctx)) == NULL) {
+        msg(M_FATAL, "wolfSSL_new failed");
+    }
+
+    cipher_name = wolfSSL_get_cipher_name(ssl);
+    if (cipher_name) {
+        strncpynt(buf, cipher_name, size);
+    } else {
+        msg(M_WARN, "wolfSSL_get_cipher_name failed");
+    }
+
+    wolfSSL_free(ssl);
+    wolfSSL_CTX_free(ctx);
+}
+
+const char * get_ssl_library_version(void) {
+    return wolfSSL_lib_version();
+}
+
 
 #endif /* ENABLE_CRYPTO_WOLFSSL */

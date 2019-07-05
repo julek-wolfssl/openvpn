@@ -28,7 +28,17 @@
 #ifndef SRC_OPENVPN_SSL_VERIFY_WOLFSSL_H_
 #define SRC_OPENVPN_SSL_VERIFY_WOLFSSL_H_
 
+#define KEEP_PEER_CERT
+#define SESSION_CERTS
+#define OPENSSL_EXTRA
 #include <wolfssl/ssl.h>
+#include "buffer.h"
+
+#ifndef __OPENVPN_X509_CERT_T_DECLARED
+#define __OPENVPN_X509_CERT_T_DECLARED
+typedef WOLFSSL_X509 openvpn_x509_cert_t;
+#endif
+
 
 /**
  * Verify that the remote OpenVPN peer's certificate allows setting up a

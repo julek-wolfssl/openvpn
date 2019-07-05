@@ -43,6 +43,11 @@
 
 #define RING_BUF_LEN (1024*30)
 
+/* TODO
+ * Implement the buffer using a linked list with smaller buffers as elements
+ * of the linked list so that it will expand and contract in size according
+ * to how much memory is needed.
+ * */
 struct ring_buffer_t {
     uint8_t buf[RING_BUF_LEN];
     uint32_t len;
