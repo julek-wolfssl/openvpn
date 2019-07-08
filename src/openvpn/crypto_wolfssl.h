@@ -69,6 +69,12 @@
 
 #define NOT_IMPLEMENTED -0x666
 
+/** Cipher should encrypt */
+#define OPENVPN_OP_ENCRYPT      1
+
+/** Cipher should decrypt */
+#define OPENVPN_OP_DECRYPT      0
+
 /** Generic cipher key type %context. */
 typedef enum {
     /* DO NOT CHANGE ORDER OF ELEMENTS */
@@ -239,8 +245,8 @@ typedef struct {
     cipher_kt_t cipher_type;
 
     enum {
-        OV_WC_ENCRYPT,
-        OV_WC_DECRYPT,
+        OV_WC_DECRYPT = OPENVPN_OP_DECRYPT,
+        OV_WC_ENCRYPT = OPENVPN_OP_ENCRYPT,
     } enc;
 
     union {
@@ -404,7 +410,7 @@ static const struct digest{
     {OV_WC_MD5, "MD5"},
 #endif
 #ifndef NO_SHA
-    {OV_WC_SHA, "SHA"},
+    {OV_WC_SHA, "SHA1"},
 #endif
 #ifdef WOLFSSL_SHA224
     {OV_WC_SHA224, "SHA224"},
@@ -489,17 +495,14 @@ typedef enum {
     OPENVPN_MODE_CFB,
     OPENVPN_MODE_OFB, // this needs to be implemented using CBC with a stream of 0's
     OPENVPN_MODE_GCM,
+    OPENVPN_MODE_OTHER,
 } cipher_modes;
 
 #define DES_KEY_LENGTH          DES_KEY_SIZE
 #define MD4_DIGEST_LENGTH       MD4_DIGEST_SIZE
+#ifndef MD5_DIGEST_LENGTH
 #define MD5_DIGEST_LENGTH       WC_MD5_DIGEST_SIZE
-
-/** Cipher should encrypt */
-#define OPENVPN_OP_ENCRYPT      1
-
-/** Cipher should decrypt */
-#define OPENVPN_OP_DECRYPT      0
+#endif
 
 
 /* Set if variable length cipher */

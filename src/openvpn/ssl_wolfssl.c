@@ -70,6 +70,13 @@ void tls_clear_error(void) {
 	wolfSSL_ERR_clear_error();
 }
 
+int tls_version_max(void) {
+#ifdef WOLFSSL_TLS13
+    return TLS_VER_1_3;
+#endif
+    return TLS_VER_1_2;
+}
+
 void tls_ctx_server_new(struct tls_root_ctx *ctx) {
     ASSERT(NULL != ctx);
 
@@ -78,13 +85,19 @@ void tls_ctx_server_new(struct tls_root_ctx *ctx) {
 #else
     ctx->ctx = wolfSSL_CTX_new(wolfTLSv1_2_server_method());
 #endif
-
-    if (ctx->ctx == NULL)
-    {
-        msg(M_FATAL, "wolfSSL_CTX_new wolfSSLv23_server_method failed");
-    }
+    check_malloc_return(ctx->ctx);
 }
 
+void tls_ctx_client_new(struct tls_root_ctx *ctx) {
+    ASSERT(NULL != ctx);
+
+#ifdef WOLFSSL_TLS13
+    ctx->ctx = wolfSSL_CTX_new(wolfTLSv1_3_client_method());
+#else
+    ctx->ctx = wolfSSL_CTX_new(wolfTLSv1_2_client_method());
+#endif
+    check_malloc_return(ctx->ctx);
+}
 
 void tls_ctx_free(struct tls_root_ctx *ctx) {
     ASSERT(NULL != ctx);
@@ -116,6 +129,8 @@ bool tls_ctx_set_options(struct tls_root_ctx *ctx, unsigned int ssl_flags) {
         break;
     case TLS_VER_1_0:
         ret = wolfSSL_CTX_SetMinVersion(ctx->ctx, WOLFSSL_TLSV1);
+        break;
+    case TLS_VER_UNSPEC:
         break;
     default:
         msg(M_FATAL, "Unidentified minimum TLS version");
@@ -168,7 +183,10 @@ void tls_ctx_restrict_ciphers_tls13(struct tls_root_ctx *ctx, const char *cipher
 }
 
 void tls_ctx_set_cert_profile(struct tls_root_ctx *ctx, const char *profile) {
-    msg(M_FATAL, "NOT IMPLEMENTED %s", __func__);
+    /*
+     * TODO Figure out how to service this in wolfSSL
+     */
+    msg(M_WARN, "NOT IMPLEMENTED %s", __func__);
 }
 
 void tls_ctx_check_cert_time(const struct tls_root_ctx *ctx) {
@@ -179,7 +197,6 @@ void tls_ctx_check_cert_time(const struct tls_root_ctx *ctx) {
 
 void tls_ctx_load_dh_params(struct tls_root_ctx *ctx, const char *dh_file,
                             const char *dh_file_inline) {
-    msg(M_FATAL, "NEEDS TESTING %s", __func__);
     int dh_len, ret;
 
     ASSERT(ctx != NULL);

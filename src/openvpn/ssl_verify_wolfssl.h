@@ -31,7 +31,10 @@
 #define KEEP_PEER_CERT
 #define SESSION_CERTS
 #define OPENSSL_EXTRA
+#include <wolfssl/options.h>
+#include <wolfssl/wolfcrypt/types.h>
 #include <wolfssl/ssl.h>
+#include <wolfssl/wolfcrypt/integer.h>
 #include "buffer.h"
 
 #ifndef __OPENVPN_X509_CERT_T_DECLARED

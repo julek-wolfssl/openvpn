@@ -815,7 +815,7 @@ int cipher_kt_mode(const cipher_kt_t *cipher_kt) {
         return OPENVPN_MODE_GCM;
     case OV_WC_NULL_CIPHER_TYPE:
     default:
-        return 0;
+        return OPENVPN_MODE_OTHER;
     }
 }
 
@@ -1121,7 +1121,7 @@ const cipher_kt_t *cipher_ctx_get_cipher_kt(const cipher_ctx_t *ctx) {
 int cipher_ctx_reset(cipher_ctx_t *ctx, const uint8_t *iv_buf) {
     int ret;
     if ((ret = wolfssl_ctx_init(ctx, (uint8_t*)&ctx->key, cipher_kt_key_size(&ctx->cipher_type),
-                                iv_buf, &ctx->cipher_type, -1)) != 1) {
+                                iv_buf, &ctx->cipher_type, ctx->enc)) != 1) {
         msg(M_FATAL, "wolfssl_ctx_init failed with Errno: %d", ret);
         return 0;
     }
@@ -1198,7 +1198,7 @@ static int wolfssl_ctx_update_blocks(cipher_ctx_t *ctx, uint8_t *dst, int *dst_l
     case OV_WC_AES_128_OFB_TYPE:
     case OV_WC_AES_192_OFB_TYPE:
     case OV_WC_AES_256_OFB_TYPE:
-        msg(M_FATAL, "OFB needs to be tested");
+        msg(M_WARN, "OFB needs to be tested");
         /* encryption and decryption are the same for OFB */
         uint8_t out_buf[AES_BLOCK_SIZE];
         for (i = 0; i < src_len; i += AES_BLOCK_SIZE) {
@@ -1458,7 +1458,7 @@ static int check_pad(cipher_ctx_t *ctx, uint8_t *buff, int block_size)
         if (buff[block_size-i-1] != n)
             return -1;
     }
-    return block_size - n;
+    return n;
 }
 
 /*
@@ -1476,7 +1476,9 @@ static int wolfssl_ctx_final(cipher_ctx_t *ctx, uint8_t *dst, int *dst_len) {
 
     *dst_len = 0;
 
-    if (ctx->buf_used == 0) {
+    if (ctx->buf_used == 0 &&
+            ctx->enc != OV_WC_DECRYPT &&
+            !needs_padding(&ctx->cipher_type)) {
         return 1;
     }
 
