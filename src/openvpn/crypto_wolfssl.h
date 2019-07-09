@@ -31,6 +31,7 @@
 
 #define WOLFSSL_DES_ECB
 #define WOLFSSL_DER_TO_PEM
+#define HAVE_AES_ECB
 
 #include <wolfssl/options.h>
 #include <wolfssl/wolfcrypt/logging.h>
