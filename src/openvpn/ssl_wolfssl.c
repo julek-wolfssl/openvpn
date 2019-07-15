@@ -151,7 +151,7 @@ bool tls_ctx_set_options(struct tls_root_ctx *ctx, unsigned int ssl_flags) {
     /* Require peer certificate verification */
 #if P2MP_SERVER
     if (ssl_flags & SSLF_CLIENT_CERT_NOT_REQUIRED) {
-        verify_flags = 0;
+        verify_flags = WOLFSSL_VERIFY_NONE;
     } else if (ssl_flags & SSLF_CLIENT_CERT_OPTIONAL) {
         verify_flags = WOLFSSL_VERIFY_PEER;
     }
@@ -308,22 +308,26 @@ void tls_ctx_load_cert_file(struct tls_root_ctx *ctx, const char *cert_file,
             msg(M_FATAL, "wolfSSL_CTX_load_verify_buffer failed with Errno: %d", ret);
             return;
         }
-        if ((ret = wolfSSL_CTX_use_certificate_chain_buffer(ctx->ctx,
-                                                            (uint8_t*) cert_file_inline,
-                                                            cert_len)) != SSL_SUCCESS ) {
-            msg(M_FATAL, "wolfSSL_CTX_use_certificate_buffer failed with Errno: %d", ret);
-            return;
-        }
+//        if ((ret = wolfSSL_CTX_use_certificate_chain_buffer(ctx->ctx,
+//                                                            (uint8_t*) cert_file_inline,
+//                                                            cert_len)) != SSL_SUCCESS ) {
+//            msg(M_FATAL, "wolfSSL_CTX_use_certificate_buffer failed with Errno: %d", ret);
+//            return;
+//        }
     } else {
         /* Certificate in file */
-        if ((ret = wolfSSL_CTX_load_verify_locations(ctx->ctx, cert_file, NULL)) != SSL_SUCCESS ) {
-            msg(M_FATAL, "wolfSSL_CTX_load_verify_locations failed with Errno: %d", ret);
+//        if ((ret = wolfSSL_CTX_load_verify_locations(ctx->ctx, cert_file, NULL)) != SSL_SUCCESS ) {
+//            msg(M_FATAL, "wolfSSL_CTX_load_verify_locations failed with Errno: %d", ret);
+//            return;
+//        }
+        if ((ret = wolfSSL_CTX_use_certificate_file(ctx->ctx, cert_file, SSL_FILETYPE_PEM)) != SSL_SUCCESS ) {
+            msg(M_FATAL, "wolfSSL_CTX_use_certificate_file failed with Errno: %d", ret);
             return;
         }
-        if ((ret = wolfSSL_CTX_use_certificate_chain_file(ctx->ctx, cert_file)) != SSL_SUCCESS ) {
-            msg(M_FATAL, "wolfSSL_CTX_use_certificate_chain_file failed with Errno: %d", ret);
-            return;
-        }
+//        if ((ret = wolfSSL_CTX_use_certificate_chain_file(ctx->ctx, cert_file)) != SSL_SUCCESS ) {
+//            msg(M_FATAL, "wolfSSL_CTX_use_certificate_chain_file failed with Errno: %d", ret);
+//            return;
+//        }
     }
 }
 
@@ -386,22 +390,22 @@ void tls_ctx_load_ca(struct tls_root_ctx *ctx, const char *ca_file,
             msg(M_FATAL, "wolfSSL_CTX_load_verify_buffer failed with Errno: %d", ret);
             return;
         }
-        if ((ret = wolfSSL_CTX_use_certificate_chain_buffer(ctx->ctx,
-                                                            (uint8_t*) ca_file_inline,
-                                                            ca_len)) != SSL_SUCCESS ) {
-            msg(M_FATAL, "wolfSSL_CTX_use_certificate_buffer failed with Errno: %d", ret);
-            return;
-        }
+//        if ((ret = wolfSSL_CTX_use_certificate_chain_buffer(ctx->ctx,
+//                                                            (uint8_t*) ca_file_inline,
+//                                                            ca_len)) != SSL_SUCCESS ) {
+//            msg(M_FATAL, "wolfSSL_CTX_use_certificate_buffer failed with Errno: %d", ret);
+//            return;
+//        }
     } else {
         /* Certificate in file */
         if ((ret = wolfSSL_CTX_load_verify_locations(ctx->ctx, ca_file, NULL)) != SSL_SUCCESS ) {
             msg(M_FATAL, "wolfSSL_CTX_load_verify_locations failed with Errno: %d", ret);
             return;
         }
-        if ((ret = wolfSSL_CTX_use_certificate_chain_file(ctx->ctx, ca_file)) != SSL_SUCCESS ) {
-            msg(M_FATAL, "wolfSSL_CTX_use_certificate_chain_file failed with Errno: %d", ret);
-            return;
-        }
+//        if ((ret = wolfSSL_CTX_use_certificate_chain_file(ctx->ctx, ca_file)) != SSL_SUCCESS ) {
+//            msg(M_FATAL, "wolfSSL_CTX_use_certificate_chain_file failed with Errno: %d", ret);
+//            return;
+//        }
     }
 
     if (ca_path) {
@@ -446,6 +450,58 @@ void tls_ctx_load_extra_certs(struct tls_root_ctx *ctx, const char *extra_certs_
  *
  * **************************************/
 
+void hexDump (char *desc, const void *addr, int len) {
+    int i;
+    unsigned char buff[17];
+    unsigned char *pc = (unsigned char*)addr;
+
+    // Output description if given.
+    if (desc != NULL)
+        printf ("%s:\n", desc);
+
+    if (len == 0) {
+        printf("  ZERO LENGTH\n");
+        return;
+    }
+    if (len < 0) {
+        printf("  NEGATIVE LENGTH: %i\n",len);
+        return;
+    }
+
+    // Process every byte in the data.
+    for (i = 0; i < len; i++) {
+        // Multiple of 16 means new line (with line offset).
+
+        if ((i % 16) == 0) {
+            // Just don't print ASCII for the zeroth line.
+            if (i != 0)
+                printf ("  %s\n", buff);
+
+            // Output the offset.
+            printf ("  %04x ", i);
+        }
+
+        // Now the hex code for the specific character.
+        printf (" %02x", pc[i]);
+
+        // And store a printable ASCII character for later.
+        if ((pc[i] < 0x20) || (pc[i] > 0x7e))
+            buff[i % 16] = '.';
+        else
+            buff[i % 16] = pc[i];
+        buff[(i % 16) + 1] = '\0';
+    }
+
+    // Pad out last line if not exactly 16 characters.
+    while ((i % 16) != 0) {
+        printf ("   ");
+        i++;
+    }
+
+    // And print the final ASCII bit.
+    printf ("  %s\n", buff);
+}
+
 /*
  * SSL is handled by library (wolfSSL in this case) but data is dumped
  * to buffers instead of being sent directly through TCP sockets. OpenVPN
@@ -478,6 +534,7 @@ static int ssl_buff_read(WOLFSSL *ssl, char *buf, int sz, void *ctx) {
                 "Bytes read: %d\n"
                 "Buffer space: %d/%d\n"
                 "sz was: %d", len, ssl_buf->len, RING_BUF_LEN, sz);
+    hexDump("ssl_buff_read", buf, len);
 
     return len;
 }
@@ -512,6 +569,9 @@ static int ssl_buff_write(WOLFSSL *ssl, char *buf, int sz, void *ctx) {
     msg(M_INFO, "Buffer written to.\n"
                 "Bytes written: %d\n"
                 "Buffer space: %d/%d", len, ssl_buf->len, RING_BUF_LEN);
+    if (ssl_buf->offset + ssl_buf->len <= RING_BUF_LEN) {
+        hexDump("ssl_buff_write", ssl_buf->buf + ssl_buf->offset, ssl_buf->len);
+    }
 
     return len;
 }
@@ -519,6 +579,8 @@ static int ssl_buff_write(WOLFSSL *ssl, char *buf, int sz, void *ctx) {
 void key_state_ssl_init(struct key_state_ssl *ks_ssl,
                         const struct tls_root_ctx *ssl_ctx, bool is_server,
                         struct tls_session *session) {
+    int err;
+
     ASSERT(ssl_ctx != NULL);
 
     if((ks_ssl->ssl = wolfSSL_new(ssl_ctx->ctx)) == NULL) {
@@ -538,13 +600,37 @@ void key_state_ssl_init(struct key_state_ssl *ks_ssl,
         msg(M_FATAL, "Failed to allocate memory for receive buffer.");
     }
 
-    /* Register functions handling queuing of data in buffers */
+    /* Register functions handling queueing of data in buffers */
     wolfSSL_SSLSetIORecv(ks_ssl->ssl, &ssl_buff_read);
     wolfSSL_SSLSetIOSend(ks_ssl->ssl, &ssl_buff_write);
 
     /* Register pointers to appropriate buffers */
     wolfSSL_SetIOWriteCtx(ks_ssl->ssl, ks_ssl->send_buf);
     wolfSSL_SetIOReadCtx(ks_ssl->ssl, ks_ssl->recv_buf);
+
+    if (is_server) {
+        if ((err = wolfSSL_accept(ks_ssl->ssl)) != SSL_SUCCESS) {
+            err = wolfSSL_get_error(ks_ssl->ssl, err);
+            switch (err) {
+            case WOLFSSL_ERROR_WANT_WRITE:
+            case WOLFSSL_ERROR_WANT_READ:
+                break;
+            default:
+                msg(M_FATAL, "wolfSSL_accept failed");
+            }
+        }
+    } else {
+        if ((err = wolfSSL_connect(ks_ssl->ssl)) != SSL_SUCCESS) {
+            err = wolfSSL_get_error(ks_ssl->ssl, err);
+            switch (err) {
+            case WOLFSSL_ERROR_WANT_WRITE:
+            case WOLFSSL_ERROR_WANT_READ:
+                break;
+            default:
+                msg(M_FATAL, "wolfSSL_connect failed");
+            }
+        }
+    }
 
     ks_ssl->session = session;
 }
@@ -572,7 +658,6 @@ void key_state_export_keying_material(struct key_state_ssl *ks_ssl,
                                  struct tls_session *session) {
     msg(M_WARN, "NOT IMPLEMENTED %s", __func__);
 }
-
 
 int key_state_write_plaintext(struct key_state_ssl *ks_ssl, struct buffer *buf) {
     int ret = 1;
@@ -611,7 +696,7 @@ int key_state_write_plaintext_const(struct key_state_ssl *ks_ssl,
     ASSERT(ks_ssl != NULL);
 
     if (len > 0) {
-//        msg(M_INFO, "Enter key_state_write_plaintext_const");
+        msg(M_INFO, "Enter key_state_write_plaintext_const");
         if ((err = wolfSSL_write(ks_ssl->ssl, data, len)) != len) {
             err = wolfSSL_get_error(ks_ssl->ssl, err);
             switch (err) {
@@ -625,6 +710,7 @@ int key_state_write_plaintext_const(struct key_state_ssl *ks_ssl,
                 goto cleanup;
             }
         }
+        hexDump("key_state_write_plaintext", data, len);
     }
 
 cleanup:
@@ -643,8 +729,9 @@ int key_state_read_ciphertext(struct key_state_ssl *ks_ssl, struct buffer *buf,
     }
 
     ASSERT(ks_ssl != NULL);
-//    msg(M_INFO, "Enter key_state_read_ciphertext");
-
+    if (ks_ssl->send_buf->len) {
+        msg(M_INFO, "Enter key_state_read_ciphertext");
+    }
     buf->len = ssl_buff_read(ks_ssl->ssl, (char*)BPTR(buf), maxlen, ks_ssl->send_buf);
 
     ret = buf->len > 0 ? 1 : 0;
@@ -663,7 +750,7 @@ int key_state_write_ciphertext(struct key_state_ssl *ks_ssl,
     ASSERT(ks_ssl != NULL);
 
     if (BLEN(buf) > 0) {
-//        msg(M_INFO, "Enter key_state_write_ciphertext");
+        msg(M_INFO, "Enter key_state_write_ciphertext");
         if ((err = (ssl_buff_write(ks_ssl->ssl, (char*) BPTR(buf),
                                    BLEN(buf), ks_ssl->recv_buf))) != BLEN(buf)) {
             ret = 0;
@@ -689,7 +776,10 @@ int key_state_read_plaintext(struct key_state_ssl *ks_ssl, struct buffer *buf,
         ret = 0;
         goto cleanup;
     }
-//    msg(M_INFO, "Enter key_state_read_plaintext");
+
+    if (ks_ssl->recv_buf->len) {
+        msg(M_INFO, "Enter key_state_read_plaintext");
+    }
 
     if ((err = wolfSSL_read(ks_ssl->ssl, BPTR(buf), maxlen)) < 0) {
         err = wolfSSL_get_error(ks_ssl->ssl, err);
@@ -704,7 +794,9 @@ int key_state_read_plaintext(struct key_state_ssl *ks_ssl, struct buffer *buf,
             goto cleanup;
         }
     }
+    hexDump("key_state_read_plaintext", BPTR(buf), err);
     buf->len = err;
+    buf->len = 0;
 
 cleanup:
     perf_pop();

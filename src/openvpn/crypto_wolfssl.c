@@ -460,7 +460,7 @@ bool key_des_check(uint8_t *key, int key_len, int ndc) {
 }
 
 /* Sets the parity of the DES key for use */
-void wolfSSL_DES_set_odd_parity(uint8_t* myDes) {
+static void wolfSSL_DES_set_odd_parity(uint8_t* myDes) {
     int i;
 
     for (i = 0; i < DES_BLOCK_SIZE; i++) {
