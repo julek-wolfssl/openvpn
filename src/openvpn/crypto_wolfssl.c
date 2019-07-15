@@ -118,12 +118,7 @@ void show_available_engines(void) {
     msg(M_INFO, "Note: wolfSSL does not have an engine");
 }
 
-const cipher_name_pair cipher_name_translation_table[] = {
-    { "AES-128-GCM", "AES-128-GCM" },
-    { "AES-192-GCM", "AES-192-GCM" },
-    { "AES-256-GCM", "AES-256-GCM" },
-    { "CHACHA20-POLY1305", "CHACHA20-POLY1305" },
-};
+const cipher_name_pair cipher_name_translation_table[] = {};
 const size_t cipher_name_translation_table_count =
     sizeof(cipher_name_translation_table) / sizeof(*cipher_name_translation_table);
 

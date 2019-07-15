@@ -350,6 +350,10 @@ openvpn_main(int argc, char *argv[])
     return 0;                               /* NOTREACHED */
 }
 
+void print_wolfssl_msg(const int logLevel, const char *const logMessage) {
+    msg(M_INFO, "%s", logMessage);
+}
+
 #ifdef _WIN32
 int
 wmain(int argc, wchar_t *wargv[])
@@ -384,6 +388,11 @@ wmain(int argc, wchar_t *wargv[])
 int
 main(int argc, char *argv[])
 {
+#ifndef DEBUG_WOLFSSL
+    ASSERT(0);
+#endif
+    ASSERT(wolfSSL_Debugging_ON() == 0);
+    ASSERT(wolfSSL_SetLoggingCb(&print_wolfssl_msg) == 0);
     return openvpn_main(argc, argv);
 }
 #endif /* ifdef _WIN32 */

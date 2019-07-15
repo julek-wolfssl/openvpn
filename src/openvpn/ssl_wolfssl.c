@@ -81,7 +81,7 @@ void tls_ctx_server_new(struct tls_root_ctx *ctx) {
     ASSERT(NULL != ctx);
 
 #ifdef WOLFSSL_TLS13
-    ctx->ctx = wolfSSL_CTX_new(wolfTLSv1_3_server_method()));
+    ctx->ctx = wolfSSL_CTX_new(wolfTLSv1_3_server_method());
 #else
     ctx->ctx = wolfSSL_CTX_new(wolfTLSv1_2_server_method());
 #endif
@@ -113,7 +113,7 @@ bool tls_ctx_initialised(struct tls_root_ctx *ctx) {
 }
 
 bool tls_ctx_set_options(struct tls_root_ctx *ctx, unsigned int ssl_flags) {
-    int ret;
+    int ret = SSL_SUCCESS;
     int verify_flags = WOLFSSL_VERIFY_PEER | WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT;
     ASSERT(NULL != ctx);
 
@@ -227,12 +227,8 @@ void tls_ctx_load_dh_params(struct tls_root_ctx *ctx, const char *dh_file,
 }
 
 void tls_ctx_load_ecdh_params(struct tls_root_ctx *ctx, const char *curve_name) {
-    msg(M_FATAL, "wolfssl does not support tls_ctx_load_ecdh_params");
-    return;
-
-#if 0
-    int i;
-    word32 oidSum = 0;
+    int nid;
+    WOLFSSL_EC_KEY* ecdh;
 
     if (curve_name == NULL) {
         return;
@@ -240,20 +236,20 @@ void tls_ctx_load_ecdh_params(struct tls_root_ctx *ctx, const char *curve_name) 
 
     msg(D_TLS_DEBUG, "Using user specified ECDH curve (%s)", curve_name);
 
-    /* find based on name */
-    for (i = 0; ecc_sets[i].id != ECC_CURVE_INVALID; i++) {
-        if (strncmp(curve_name, ecc_sets[i].name, ECC_MAXNAME) == 0) {
-            oidSum = ecc_sets[i].oidSum;
-        }
-    }
-
-    if (oidSum == 0) {
+    if ((nid = wc_ecc_get_curve_id_from_name(curve_name)) < 0) {
         msg(M_FATAL, "Unknown curve name: %s", curve_name);
     }
 
-    // ctx->ctx is an incomplete type
-    ctx->ctx->ecdhCurveOID = oidSum;
-#endif
+    if (!(ecdh = wolfSSL_EC_KEY_new_by_curve_name(nid))) {
+        msg(M_FATAL, "wolfSSL_EC_KEY_new_by_curve_name failed");
+    }
+
+    if (wolfSSL_SSL_CTX_set_tmp_ecdh(ctx->ctx, ecdh) != WOLFSSL_SUCCESS) {
+        wolfSSL_EC_KEY_free(ecdh);
+        msg(M_FATAL, "wolfSSL_SSL_CTX_set_tmp_ecdh failed");
+    }
+
+    wolfSSL_EC_KEY_free(ecdh);
 }
 
 int tls_ctx_load_pkcs12(struct tls_root_ctx *ctx, const char *pkcs12_file,
@@ -461,7 +457,7 @@ static int ssl_buff_read(WOLFSSL *ssl, char *buf, int sz, void *ctx) {
     uint32_t len = sz < ssl_buf->len ? sz : ssl_buf->len;
 
     if (len == 0) {
-        return 0;
+        return WOLFSSL_CBIO_ERR_WANT_READ;
     }
 
     if (ssl_buf->offset + len <= RING_BUF_LEN) {
@@ -469,6 +465,7 @@ static int ssl_buff_read(WOLFSSL *ssl, char *buf, int sz, void *ctx) {
         memcpy(buf, ssl_buf->buf + ssl_buf->offset, len);
     } else {
         /* The data wraps around the end to the beginning of the buffer */
+        msg(M_INFO, "READ ring buffer is wrapping around.");
         uint32_t partial_len = RING_BUF_LEN - ssl_buf->offset;
         memcpy(buf, ssl_buf->buf + ssl_buf->offset, partial_len);
         memcpy(buf + partial_len, ssl_buf->buf, len - partial_len);
@@ -476,6 +473,11 @@ static int ssl_buff_read(WOLFSSL *ssl, char *buf, int sz, void *ctx) {
     ssl_buf->offset += len;
     ssl_buf->offset %= RING_BUF_LEN;
     ssl_buf->len -= len;
+
+    msg(M_INFO, "Buffer read from.\n"
+                "Bytes read: %d\n"
+                "Buffer space: %d/%d\n"
+                "sz was: %d", len, ssl_buf->len, RING_BUF_LEN, sz);
 
     return len;
 }
@@ -491,7 +493,7 @@ static int ssl_buff_write(WOLFSSL *ssl, char *buf, int sz, void *ctx) {
         msg(M_FATAL, "Ring buffer is too small to hold all data.");
     }
 
-    if (ssl_buf->len + len <= RING_BUF_LEN) {
+    if (ssl_buf->len + len > RING_BUF_LEN) {
         return WOLFSSL_CBIO_ERR_WANT_WRITE;
     }
 
@@ -500,11 +502,16 @@ static int ssl_buff_write(WOLFSSL *ssl, char *buf, int sz, void *ctx) {
         memcpy(ssl_buf->buf + ssl_buf->offset + ssl_buf->len, buf, len);
     } else {
         /* The data will wrap around the end to the beginning of the buffer */
+        msg(M_INFO, "WRITE ring buffer is wrapping around.");
         uint32_t partial_len = RING_BUF_LEN - (ssl_buf->offset + ssl_buf->len);
         memcpy(ssl_buf->buf + ssl_buf->offset + ssl_buf->len, buf, partial_len);
         memcpy(ssl_buf->buf, buf + partial_len, len - partial_len);
     }
     ssl_buf->len += len;
+
+    msg(M_INFO, "Buffer written to.\n"
+                "Bytes written: %d\n"
+                "Buffer space: %d/%d", len, ssl_buf->len, RING_BUF_LEN);
 
     return len;
 }
@@ -538,9 +545,6 @@ void key_state_ssl_init(struct key_state_ssl *ks_ssl,
     /* Register pointers to appropriate buffers */
     wolfSSL_SetIOWriteCtx(ks_ssl->ssl, ks_ssl->send_buf);
     wolfSSL_SetIOReadCtx(ks_ssl->ssl, ks_ssl->recv_buf);
-
-    /* Set non blocking mode so that wolfSSL_write won't lock up when ring buffer is full */
-    wolfSSL_set_using_nonblock(ks_ssl->ssl, 1);
 
     ks_ssl->session = session;
 }
@@ -607,14 +611,16 @@ int key_state_write_plaintext_const(struct key_state_ssl *ks_ssl,
     ASSERT(ks_ssl != NULL);
 
     if (len > 0) {
+//        msg(M_INFO, "Enter key_state_write_plaintext_const");
         if ((err = wolfSSL_write(ks_ssl->ssl, data, len)) != len) {
-            if (wolfSSL_want_write(ks_ssl->ssl)) {
-                /* Call again later when the buffer is freed up */
+            err = wolfSSL_get_error(ks_ssl->ssl, err);
+            switch (err) {
+            case WOLFSSL_ERROR_WANT_WRITE:
+            case WOLFSSL_ERROR_WANT_READ:
                 ret = 0;
                 goto cleanup;
-            } else {
-                msg(M_WARN, "wolfSSL_write failed with Errno: %d",
-                    wolfSSL_get_error(ks_ssl->ssl, err));
+            default:
+                msg(M_WARN, "wolfSSL_write failed with Error: %s", wc_GetErrorString(err));
                 ret =  -1;
                 goto cleanup;
             }
@@ -637,6 +643,7 @@ int key_state_read_ciphertext(struct key_state_ssl *ks_ssl, struct buffer *buf,
     }
 
     ASSERT(ks_ssl != NULL);
+//    msg(M_INFO, "Enter key_state_read_ciphertext");
 
     buf->len = ssl_buff_read(ks_ssl->ssl, (char*)BPTR(buf), maxlen, ks_ssl->send_buf);
 
@@ -656,6 +663,7 @@ int key_state_write_ciphertext(struct key_state_ssl *ks_ssl,
     ASSERT(ks_ssl != NULL);
 
     if (BLEN(buf) > 0) {
+//        msg(M_INFO, "Enter key_state_write_ciphertext");
         if ((err = (ssl_buff_write(ks_ssl->ssl, (char*) BPTR(buf),
                                    BLEN(buf), ks_ssl->recv_buf))) != BLEN(buf)) {
             ret = 0;
@@ -681,13 +689,22 @@ int key_state_read_plaintext(struct key_state_ssl *ks_ssl, struct buffer *buf,
         ret = 0;
         goto cleanup;
     }
+//    msg(M_INFO, "Enter key_state_read_plaintext");
 
     if ((err = wolfSSL_read(ks_ssl->ssl, BPTR(buf), maxlen)) < 0) {
-        msg(M_WARN, "wolfSSL_write failed with Errno: %d",
-            wolfSSL_get_error(ks_ssl->ssl, err));
-        ret =  -1;
-        goto cleanup;
+        err = wolfSSL_get_error(ks_ssl->ssl, err);
+        switch (err) {
+        case WOLFSSL_ERROR_WANT_WRITE:
+        case WOLFSSL_ERROR_WANT_READ:
+            ret = 0;
+            goto cleanup;
+        default:
+            msg(M_WARN, "wolfSSL_read failed with Error: %s", wc_GetErrorString(err));
+            ret =  -1;
+            goto cleanup;
+        }
     }
+    buf->len = err;
 
 cleanup:
     perf_pop();

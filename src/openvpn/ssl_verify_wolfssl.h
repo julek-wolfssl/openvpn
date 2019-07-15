@@ -28,9 +28,6 @@
 #ifndef SRC_OPENVPN_SSL_VERIFY_WOLFSSL_H_
 #define SRC_OPENVPN_SSL_VERIFY_WOLFSSL_H_
 
-#define KEEP_PEER_CERT
-#define SESSION_CERTS
-#define OPENSSL_EXTRA
 #include <wolfssl/options.h>
 #include <wolfssl/wolfcrypt/types.h>
 #include <wolfssl/ssl.h>
