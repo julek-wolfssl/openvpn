@@ -633,6 +633,7 @@ void key_state_ssl_init(struct key_state_ssl *ks_ssl,
     }
 
     ks_ssl->session = session;
+    wolfSSL_SetCertCbCtx(ks_ssl->ssl, ks_ssl);
 }
 
 void key_state_ssl_free(struct key_state_ssl *ks_ssl) {
@@ -796,7 +797,6 @@ int key_state_read_plaintext(struct key_state_ssl *ks_ssl, struct buffer *buf,
     }
     hexDump("key_state_read_plaintext", BPTR(buf), err);
     buf->len = err;
-    buf->len = 0;
 
 cleanup:
     perf_pop();

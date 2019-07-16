@@ -36,18 +36,24 @@
 
 #if defined(ENABLE_CRYPTO_WOLFSSL)
 
-#include "ssl_verify_wolfssl.h"
+#include "ssl_backend.h"
 #include "ssl_verify.h"
 #include "ssl_verify_backend.h"
 
 int verify_callback(int preverify_ok, WOLFSSL_X509_STORE_CTX *store) {
-    return 1;
     char buffer[WOLFSSL_MAX_ERROR_SZ];
+    struct key_state_ssl* ks_ssl = store->userCtx;
+
     if (store->error) {
         msg(M_INFO, "In verification callback, error = %d, %s\n", store->error,
                                      wolfSSL_ERR_error_string(store->error, buffer));
         return 0;
     } else {
+        if (verify_cert(ks_ssl->session,
+                        store->current_cert,
+                        store->error_depth) != SUCCESS ){
+            return 0;
+        }
         return 1;
     }
 }
@@ -92,17 +98,37 @@ struct buffer x509_get_sha256_fingerprint(X509 *cert, struct gc_arena *gc) {
 
 result_t backend_x509_get_username(char *common_name, int cn_len,
                                    char *x509_username_field, openvpn_x509_cert_t *peer_cert) {
-
 #ifdef ENABLE_X509ALTUSERNAME
     if (strncmp("ext:",x509_username_field,4) == 0) {
-
+        ASSERT(0);
     } else
 #endif
     {
+        char *subject;
+        char *c;
+        char *start_pos;
+        int field_len = strlen(x509_username_field);
+        int value_len;
+        WOLFSSL_X509_NAME* name = wolfSSL_X509_get_subject_name(peer_cert);
+        if (!name) {
+            return FAILURE;
+        }
+        subject = wolfSSL_X509_NAME_oneline(name, NULL, 0);
 
+        for (c = subject; *c != '\0'; c++) {
+            if (*c == '/' && strncmp(++c, x509_username_field, field_len) == 0) {
+                c += field_len; // increment to value of field
+                start_pos = c + 1;
+                while (*(++c) != '/' && *c != '\0'); // inc to next slash
+                value_len = MIN(c-start_pos, cn_len);
+                memcpy(common_name, start_pos, value_len);
+                break;
+            }
+        }
+
+        free(subject);
     }
-    msg(M_FATAL, "NOT IMPLEMENTED %s", __func__);
-    return FAILURE;
+    return SUCCESS;
 }
 
 #ifdef ENABLE_X509ALTUSERNAME
@@ -182,7 +208,67 @@ char *backend_x509_get_serial_hex(openvpn_x509_cert_t *cert,
 }
 
 void x509_setenv(struct env_set *es, int cert_depth, openvpn_x509_cert_t *cert) {
-    msg(M_FATAL, "NOT IMPLEMENTED %s", __func__);
+    char *subject;
+    char *c;
+    char *name_start_pos;
+    int name_len;
+    char *value_start_pos;
+    int value_len;
+    char* name_buf = NULL;
+    char* value_buf = NULL;
+    char *full_name_buf = NULL;
+    int full_name_len;
+    WOLFSSL_X509_NAME* name = wolfSSL_X509_get_subject_name(cert);
+    if (!name) {
+        return;
+    }
+    subject = wolfSSL_X509_NAME_oneline(name, NULL, 0);
+
+    for (c = subject; *c != '\0';) {
+        ASSERT(*c == '/'); // c should point to slash on each loop
+
+        name_start_pos = c + 1;
+        while (*(++c) != '=' && *c != '\0'); // inc to equals sign
+        name_len = c - name_start_pos;
+
+        value_start_pos = c + 1;
+        while (*(++c) != '/' && *c != '\0'); // inc to next slash
+        value_len = c - value_start_pos;
+
+        /*
+         * length of buffer is: length of name + null teminator +
+         *                      6 chars from naming convention +
+         *                      5 chars for depth number (should be enough)
+         */
+        full_name_len = name_len + 1 + 6 + 5;
+
+        name_buf = realloc(name_buf, name_len + 1);
+        check_malloc_return(name_buf);
+        full_name_buf = realloc(full_name_buf, full_name_len);
+        check_malloc_return(full_name_buf);
+        value_buf = realloc(value_buf, value_len + 1);
+        check_malloc_return(value_buf);
+
+        memcpy(name_buf, name_start_pos, name_len);
+        memcpy(value_buf, value_start_pos, value_len);
+        name_buf[name_len] = '\0';
+        value_buf[value_len] = '\0';
+
+        snprintf(full_name_buf, full_name_len, "X509_%d_%s", cert_depth, name_buf);
+
+        setenv_str_incr(es, full_name_buf, value_buf);
+    }
+
+    if (name_buf) {
+        free(name_buf);
+    }
+    if (full_name_buf) {
+        free(full_name_buf);
+    }
+    if (value_buf) {
+        free(value_buf);
+    }
+    free(subject);
 }
 
 void x509_track_add(const struct x509_track **ll_head, const char *name,
@@ -201,6 +287,20 @@ result_t x509_verify_ns_cert_type(openvpn_x509_cert_t *cert, const int usage) {
 
 result_t x509_verify_cert_ku(openvpn_x509_cert_t *x509, const unsigned *const expected_ku,
                              int expected_len) {
+    unsigned int ku = wolfSSL_X509_get_keyUsage(x509);
+
+    if (ku == 0)
+    {
+        msg(D_TLS_ERRORS, "Certificate does not have key usage extension");
+        return FAILURE;
+    }
+
+    if (expected_ku[0] == OPENVPN_KU_REQUIRED)
+    {
+        /* Extension required, value checked by TLS library */
+        return SUCCESS;
+    }
+
     msg(M_FATAL, "NOT IMPLEMENTED %s", __func__);
 }
 
