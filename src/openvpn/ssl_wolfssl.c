@@ -804,7 +804,20 @@ cleanup:
 }
 
 void print_details(struct key_state_ssl *ks_ssl, const char *prefix) {
-    msg(M_WARN, "NOT IMPLEMENTED %s", __func__);
+    WOLFSSL_X509 *cert;
+
+    cert = wolfSSL_get_peer_certificate(ks_ssl->ssl);
+    if (cert != NULL) {
+        /*
+         * Print straight to stdout
+         */
+        WOLFSSL_BIO* bio;
+        bio = wolfSSL_BIO_new(wolfSSL_BIO_s_file());
+        if (wolfSSL_BIO_set_fp(bio, stdout, BIO_NOCLOSE) == WOLFSSL_SUCCESS) {
+            wolfSSL_X509_print(bio, cert);
+        }
+        BIO_free(bio);
+    }
 }
 
 void show_available_tls_ciphers_list(const char *cipher_list,

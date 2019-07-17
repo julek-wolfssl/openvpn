@@ -289,14 +289,12 @@ result_t x509_verify_cert_ku(openvpn_x509_cert_t *x509, const unsigned *const ex
                              int expected_len) {
     unsigned int ku = wolfSSL_X509_get_keyUsage(x509);
 
-    if (ku == 0)
-    {
+    if (ku == 0) {
         msg(D_TLS_ERRORS, "Certificate does not have key usage extension");
         return FAILURE;
     }
 
-    if (expected_ku[0] == OPENVPN_KU_REQUIRED)
-    {
+    if (expected_ku[0] == OPENVPN_KU_REQUIRED) {
         /* Extension required, value checked by TLS library */
         return SUCCESS;
     }
@@ -304,8 +302,77 @@ result_t x509_verify_cert_ku(openvpn_x509_cert_t *x509, const unsigned *const ex
     msg(M_FATAL, "NOT IMPLEMENTED %s", __func__);
 }
 
+static const char* oid_translate_num_to_str(const char* oid) {
+    static const struct oid_dict {
+        char* num;
+        char* desc;
+    } oid_dict[] = {
+        {"2.5.29.37.0", "Any Extended Key Usage"},
+        {"1.3.6.1.5.5.7.3.1", "TLS Web Server Authentication"},
+        {"1.3.6.1.5.5.7.3.2", "TLS Web Client Authentication"},
+        {"1.3.6.1.5.5.7.3.3", "Code Signing"},
+        {"1.3.6.1.5.5.7.3.4", "E-mail Protection"},
+        {"1.3.6.1.5.5.7.3.8", "Time Stamping"},
+        {"1.3.6.1.5.5.7.3.9", "OCSP Signing"},
+        {NULL, NULL}
+    };
+    const struct oid_dict* idx;
+    for (idx = oid_dict; idx->num != NULL; idx++) {
+        if (!strcmp(oid, idx->num)) {
+            return idx->desc;
+        }
+    }
+    return NULL;
+}
+
 result_t x509_verify_cert_eku(openvpn_x509_cert_t *x509, const char *const expected_oid) {
-    msg(M_FATAL, "NOT IMPLEMENTED %s", __func__);
+    WOLFSSL_STACK *eku = NULL;
+    result_t found = FAILURE;
+    const char* desc;
+
+    if ((eku = (WOLFSSL_STACK *) wolfSSL_X509_get_ext_d2i(x509, EXT_KEY_USAGE_OID,
+                                                          NULL, NULL)) == NULL) {
+        msg(D_HANDSHAKE, "Certificate does not have extended key usage extension");
+    } else {
+        int i;
+
+        msg(D_HANDSHAKE, "Validating certificate extended key usage");
+        for (i = 0; i < wolfSSL_sk_GENERAL_NAME_num(eku); i++) {
+            WOLFSSL_ASN1_OBJECT *oid = wolfSSL_sk_GENERAL_NAME_value(eku, i);
+            char szOid[1024];
+
+            if (wolfSSL_OBJ_obj2txt(szOid, sizeof(szOid), oid, 0) > 0) {
+                msg(D_HANDSHAKE, "++ Certificate has EKU (str) %s, expects %s",
+                    szOid, expected_oid);
+                if (!strcmp(expected_oid, szOid)) {
+                    found = SUCCESS;
+                    break;
+                }
+            }
+            if (wolfSSL_OBJ_obj2txt(szOid, sizeof(szOid), oid, 1) > 0) {
+                msg(D_HANDSHAKE, "++ Certificate has EKU (oid) %s, expects %s",
+                    szOid, expected_oid);
+                if (!strcmp(expected_oid, szOid)) {
+                    found = SUCCESS;
+                    break;
+                }
+                if ((desc = oid_translate_num_to_str(szOid)) != NULL) {
+                    msg(D_HANDSHAKE, "++ oid %s translated to %s",
+                            szOid, desc);
+                    if (!strcmp(expected_oid, desc)) {
+                        found = SUCCESS;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    if (eku != NULL) {
+        wolfSSL_sk_GENERAL_NAME_pop_free(eku, NULL);
+    }
+
+    return found;
 }
 
 result_t x509_write_pem(FILE *peercert_file, openvpn_x509_cert_t *peercert) {
