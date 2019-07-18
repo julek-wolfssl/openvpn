@@ -32,6 +32,7 @@
 #include <wolfssl/wolfcrypt/types.h>
 #include <wolfssl/ssl.h>
 #include <wolfssl/wolfcrypt/integer.h>
+#include <wolfssl/wolfcrypt/asn_public.h>
 #include "buffer.h"
 
 #ifndef __OPENVPN_X509_CERT_T_DECLARED

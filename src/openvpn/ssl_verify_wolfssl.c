@@ -254,7 +254,7 @@ void x509_setenv(struct env_set *es, int cert_depth, openvpn_x509_cert_t *cert) 
         name_buf[name_len] = '\0';
         value_buf[value_len] = '\0';
 
-        snprintf(full_name_buf, full_name_len, "X509_%d_%s", cert_depth, name_buf);
+        openvpn_snprintf(full_name_buf, full_name_len, "X509_%d_%s", cert_depth, name_buf);
 
         setenv_str_incr(es, full_name_buf, value_buf);
     }
@@ -273,16 +273,124 @@ void x509_setenv(struct env_set *es, int cert_depth, openvpn_x509_cert_t *cert) 
 
 void x509_track_add(const struct x509_track **ll_head, const char *name,
                     int msglevel, struct gc_arena *gc) {
-    msg(M_FATAL, "NOT IMPLEMENTED %s", __func__);
+    struct x509_track *xt;
+    ALLOC_OBJ_CLEAR_GC(xt, struct x509_track, gc);
+    if (*name == '+') {
+        xt->flags |= XT_FULL_CHAIN;
+        ++name;
+    }
+    xt->name = name;
+    xt->nid = wolfSSL_OBJ_txt2nid(name);
+    if (xt->nid != NID_undef) {
+        xt->next = *ll_head;
+        *ll_head = xt;
+    } else {
+        msg(msglevel, "x509_track: no such attribute '%s'", name);
+    }
+}
+
+/* worker method for setenv_x509_track */
+static void do_setenv_x509(struct env_set *es, const char *name, char *value, int depth)
+{
+    char *name_expand;
+    size_t name_expand_size;
+
+    string_mod(value, CC_ANY, CC_CRLF, '?');
+    msg(D_X509_ATTR, "X509 ATTRIBUTE name='%s' value='%s' depth=%d", name, value, depth);
+    name_expand_size = 64 + strlen(name);
+    name_expand = (char *) malloc(name_expand_size);
+    check_malloc_return(name_expand);
+    openvpn_snprintf(name_expand, name_expand_size, "X509_%d_%s", depth, name);
+    setenv_str(es, name_expand, value);
+    free(name_expand);
 }
 
 void x509_setenv_track(const struct x509_track *xt, struct env_set *es,
                        const int depth, openvpn_x509_cert_t *x509) {
-    msg(M_FATAL, "NOT IMPLEMENTED %s", __func__);
+    struct gc_arena gc = gc_new();
+    struct buffer fp_buf;
+    char *fp_str = NULL;
+    int i;
+    WOLFSSL_X509_NAME *x509_name = wolfSSL_X509_get_subject_name(x509);
+    while (xt) {
+        if (depth == 0 || (xt->flags & XT_FULL_CHAIN)) {
+
+            switch (xt->nid)
+            {
+                case NID_sha1:
+                case NID_sha256:
+
+                    if (xt->nid == NID_sha1)
+                    {
+                        fp_buf = x509_get_sha1_fingerprint(x509, &gc);
+                    }
+                    else
+                    {
+                        fp_buf = x509_get_sha256_fingerprint(x509, &gc);
+                    }
+
+                    fp_str = format_hex_ex(BPTR(&fp_buf), BLEN(&fp_buf), 0,
+                                           1 | FHE_CAPS, ":", &gc);
+                    do_setenv_x509(es, xt->name, fp_str, depth);
+                    break;
+                default:
+                    i = wolfSSL_X509_NAME_get_index_by_NID(x509_name, xt->nid, -1);
+                    if (i >= 0) {
+                        WOLFSSL_X509_NAME_ENTRY *ent = wolfSSL_X509_NAME_get_entry(x509_name, i);
+                        if (ent) {
+                            WOLFSSL_ASN1_STRING *val = wolfSSL_X509_NAME_ENTRY_get_data(ent);
+                            do_setenv_x509(es, xt->name, val->data, depth);
+                        }
+                    }
+#if 0
+                    else {
+                        WOLFSSL_STACK *ext = wolfSSL_X509_get_ext_d2i(x509, xt->nid, NULL, 0);
+                        if (ext) {
+
+                            for (i = 0; i < wolfSSL_sk_GENERAL_NAME_num(ext); i++) {
+                                WOLFSSL_ASN1_OBJECT *oid = wolfSSL_sk_GENERAL_NAME_value(eku, i);
+                                char szOid[1024];
+
+                                if (wolfSSL_OBJ_obj2txt(szOid, sizeof(szOid), oid, 0) > 0) {
+                                    if (!strcmp(expected_oid, szOid)) {
+                                        do_setenv_x509(es, xt->name, szOid, depth);
+                                        break;
+                                    }
+                                }
+                                if (wolfSSL_OBJ_obj2txt(szOid, sizeof(szOid), oid, 1) > 0) {
+                                    msg(D_HANDSHAKE, "++ Certificate has EKU (oid) %s, expects %s",
+                                        szOid, expected_oid);
+                                    if (!strcmp(expected_oid, szOid)) {
+                                        do_setenv_x509(es, xt->name, szOid, depth);
+                                        break;
+                                    }
+                                    if ((desc = oid_translate_num_to_str(szOid)) != NULL) {
+                                        msg(D_HANDSHAKE, "++ oid %s translated to %s",
+                                                szOid, desc);
+                                        if (!strcmp(expected_oid, desc)) {
+                                            do_setenv_x509(es, xt->name, szOid, depth);
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+#endif
+            }
+        }
+        xt = xt->next;
+    }
+    gc_free(&gc);
 }
 
 result_t x509_verify_ns_cert_type(openvpn_x509_cert_t *cert, const int usage) {
-    msg(M_FATAL, "NOT IMPLEMENTED %s", __func__);
+    if (usage == NS_CERT_CHECK_NONE) {
+        return SUCCESS;
+    }
+
+    msg(M_FATAL, "wolfSSL does not grant access to the Netscape Cert Type extension.");
+    return FAILURE;
 }
 
 result_t x509_verify_cert_ku(openvpn_x509_cert_t *x509, const unsigned *const expected_ku,
@@ -299,7 +407,30 @@ result_t x509_verify_cert_ku(openvpn_x509_cert_t *x509, const unsigned *const ex
         return SUCCESS;
     }
 
-    msg(M_FATAL, "NOT IMPLEMENTED %s", __func__);
+    /*
+     * Fixup if no LSB bits
+     */
+    if ((ku & 0xff) == 0) {
+        ku >>= 8;
+    }
+
+    msg(D_HANDSHAKE, "Validating certificate key usage");
+    result_t fFound = FAILURE;
+    for (size_t i = 0; i < expected_len; i++) {
+        if (expected_ku[i] != 0 && (ku & expected_ku[i]) == expected_ku[i]) {
+            fFound = SUCCESS;
+            break;
+        }
+    }
+
+    if (fFound != SUCCESS) {
+        msg(D_TLS_ERRORS, "ERROR: Certificate has key usage %04x, expected one of:", ku);
+        for (size_t i = 0; i < expected_len && expected_ku[i]; i++) {
+            msg(D_TLS_ERRORS, " * %04x", expected_ku[i]);
+        }
+    }
+
+    return fFound;
 }
 
 static const char* oid_translate_num_to_str(const char* oid) {
@@ -376,11 +507,18 @@ result_t x509_verify_cert_eku(openvpn_x509_cert_t *x509, const char *const expec
 }
 
 result_t x509_write_pem(FILE *peercert_file, openvpn_x509_cert_t *peercert) {
-    msg(M_FATAL, "NOT IMPLEMENTED %s", __func__);
+    if (wolfSSL_PEM_write_X509(peercert_file, peercert) < 0) {
+        msg(M_NONFATAL, "Failed to write peer certificate in PEM format");
+        return FAILURE;
+    }
+    return SUCCESS;
 }
 
 bool tls_verify_crl_missing(const struct tls_options *opt) {
-    msg(M_FATAL, "NOT IMPLEMENTED %s", __func__);
+    /*
+     * This is checked at load time.
+     */
+    return false;
 }
 
 #endif /* ENABLE_CRYPTO_WOLFSSL */
