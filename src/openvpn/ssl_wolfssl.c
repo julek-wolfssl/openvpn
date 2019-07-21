@@ -183,10 +183,10 @@ void tls_ctx_restrict_ciphers_tls13(struct tls_root_ctx *ctx, const char *cipher
 }
 
 void tls_ctx_set_cert_profile(struct tls_root_ctx *ctx, const char *profile) {
-    /*
-     * TODO Figure out how to service this in wolfSSL
-     */
-    msg(M_WARN, "NOT IMPLEMENTED %s", __func__);
+    if (profile) {
+        msg(M_WARN, "WARNING: wolfSSL does not support --tls-cert-profile"
+                    ", ignoring user-set profile: '%s'", profile);
+    }
 }
 
 void tls_ctx_check_cert_time(const struct tls_root_ctx *ctx) {
@@ -211,7 +211,7 @@ void tls_ctx_load_dh_params(struct tls_root_ctx *ctx, const char *dh_file,
         if ((ret = wolfSSL_CTX_SetTmpDH_buffer(ctx->ctx,
                                                (uint8_t*) dh_file_inline,
                                                dh_len,
-                                               WOLFSSL_FILETYPE_PEM)) != SSL_SUCCESS) {
+                                               SSL_FILETYPE_PEM)) != SSL_SUCCESS) {
             msg(M_FATAL, "wolfSSL_CTX_SetTmpDH_buffer failed with Errno: %d", ret);
             return;
         }
@@ -219,7 +219,7 @@ void tls_ctx_load_dh_params(struct tls_root_ctx *ctx, const char *dh_file,
         /* Parameters in file */
         if ((ret = wolfSSL_CTX_SetTmpDH_file(ctx->ctx,
                                              dh_file,
-                                             WOLFSSL_FILETYPE_PEM)) != SSL_SUCCESS) {
+                                             SSL_FILETYPE_PEM)) != SSL_SUCCESS) {
             msg(M_FATAL, "wolfSSL_CTX_SetTmpDH_file failed with Errno: %d", ret);
             return;
         }
@@ -347,7 +347,7 @@ int tls_ctx_load_priv_file(struct tls_root_ctx *ctx, const char *priv_key_file,
         if ((ret = wolfSSL_CTX_use_PrivateKey_buffer(ctx->ctx,
                                                      (uint8_t*) priv_key_file_inline,
                                                      key_len,
-                                                     WOLFSSL_FILETYPE_PEM)) != SSL_SUCCESS ) {
+                                                     SSL_FILETYPE_PEM)) != SSL_SUCCESS ) {
             msg(M_FATAL, "wolfSSL_CTX_use_PrivateKey_buffer failed with Errno: %d", ret);
             return 1;
         }
@@ -355,7 +355,7 @@ int tls_ctx_load_priv_file(struct tls_root_ctx *ctx, const char *priv_key_file,
         /* Key in file */
         if ((ret = wolfSSL_CTX_use_PrivateKey_file(ctx->ctx,
                                                    priv_key_file,
-                                                   WOLFSSL_FILETYPE_PEM)) != SSL_SUCCESS ) {
+                                                   SSL_FILETYPE_PEM)) != SSL_SUCCESS ) {
             msg(M_FATAL, "wolfSSL_CTX_use_PrivateKey_file failed with Errno: %d", ret);
             return 1;
         }
@@ -365,7 +365,7 @@ int tls_ctx_load_priv_file(struct tls_root_ctx *ctx, const char *priv_key_file,
 
 #ifdef ENABLE_MANAGEMENT
 int tls_ctx_use_management_external_key(struct tls_root_ctx *ctx) {
-    msg(M_FATAL, "NOT IMPLEMENTED %s", __func__);
+    msg(M_INFO, "%s: key already loaded", __func__);
     return 1;
 }
 #endif /* ENABLE_MANAGEMENT */
@@ -538,6 +538,7 @@ static int ssl_buff_read(WOLFSSL *ssl, char *buf, int sz, void *ctx) {
 
     return len;
 }
+
 static int ssl_buff_write(WOLFSSL *ssl, char *buf, int sz, void *ctx) {
     struct ring_buffer_t* ssl_buf = (struct ring_buffer_t*)ctx;
     uint32_t len = sz;
@@ -652,12 +653,28 @@ void key_state_ssl_free(struct key_state_ssl *ks_ssl) {
 
 void backend_tls_ctx_reload_crl(struct tls_root_ctx *ssl_ctx,
                                 const char *crl_file, const char *crl_inline) {
-    msg(M_FATAL, "NOT IMPLEMENTED %s", __func__);
+    int ret, len;
+    if (!strcmp(crl_file, INLINE_FILE_TAG) && crl_inline) {
+        /* CRL in memory */
+        if ((len = strlen(crl_inline)) == 0) {
+            msg(M_FATAL, "Empty CRL passed.");
+            return;
+        }
+        if ((ret = wolfSSL_CTX_LoadCRLBuffer(ssl_ctx->ctx, (unsigned char*)crl_inline,
+                                             len, SSL_FILETYPE_PEM)) != SSL_SUCCESS) {
+            msg(M_FATAL, "wolfSSL_CTX_LoadCRLBuffer failed with Errno: %d", ret);
+        }
+    } else {
+        /* CRL in file */
+        if ((ret = wolfSSL_CTX_LoadCRL(ssl_ctx->ctx, crl_file, SSL_FILETYPE_PEM, 0)) != SSL_SUCCESS) {
+            msg(M_FATAL, "wolfSSL_CTX_LoadCRL failed with Errno: %d", ret);
+        }
+    }
 }
 
 void key_state_export_keying_material(struct key_state_ssl *ks_ssl,
-                                 struct tls_session *session) {
-    msg(M_WARN, "NOT IMPLEMENTED %s", __func__);
+                                      struct tls_session *session) {
+    msg(M_FATAL, "%s not supported by wolfSSL", __func__);
 }
 
 int key_state_write_plaintext(struct key_state_ssl *ks_ssl, struct buffer *buf) {
@@ -823,11 +840,38 @@ void print_details(struct key_state_ssl *ks_ssl, const char *prefix) {
 void show_available_tls_ciphers_list(const char *cipher_list,
                                      const char *tls_cert_profile,
                                      bool tls13) {
-    msg(M_WARN, "NOT IMPLEMENTED %s", __func__);
+    int i;
+    char* cipher;
+    WOLFSSL *ssl;
+    WOLFSSL_CTX *ctx;
+
+    if ((ctx = wolfSSL_CTX_new(wolfTLSv1_2_client_method())) == NULL){
+        wolfSSL_CTX_free(ctx);
+        msg(M_FATAL, "wolfSSL_CTX_new failed");
+    }
+    if (cipher_list) {
+        if (wolfSSL_CTX_set_cipher_list(ctx, cipher_list) != SSL_SUCCESS) {
+            msg(M_FATAL, "Failed to set ciphers: %s", cipher_list);
+        }
+    }
+    if((ssl = wolfSSL_new(ctx)) == NULL) {
+        msg(M_FATAL, "wolfSSL_new failed");
+    }
+    for (i=0; (cipher=wolfSSL_get_cipher_list_ex(ssl, i)); i++) {
+        printf("%s\n", cipher);
+    }
 }
 
 void show_available_curves(void) {
-    msg(M_WARN, "NOT IMPLEMENTED %s", __func__);
+#ifdef HAVE_ECC
+    int i;
+    printf("Available Elliptic curves:\n");
+    for (i=0; ecc_sets[i].id != ECC_CURVE_INVALID; i++) {
+        printf("%s\n", ecc_sets[i].name);
+    }
+#else
+    msg(M_FATAL, "wolfSSL library compiled without ECC support.");
+#endif
 }
 
 void get_highest_preference_tls_cipher(char *buf, int size) {

@@ -319,16 +319,11 @@ void x509_setenv_track(const struct x509_track *xt, struct env_set *es,
             {
                 case NID_sha1:
                 case NID_sha256:
-
-                    if (xt->nid == NID_sha1)
-                    {
+                    if (xt->nid == NID_sha1) {
                         fp_buf = x509_get_sha1_fingerprint(x509, &gc);
-                    }
-                    else
-                    {
+                    } else {
                         fp_buf = x509_get_sha256_fingerprint(x509, &gc);
                     }
-
                     fp_str = format_hex_ex(BPTR(&fp_buf), BLEN(&fp_buf), 0,
                                            1 | FHE_CAPS, ":", &gc);
                     do_setenv_x509(es, xt->name, fp_str, depth);
@@ -341,42 +336,24 @@ void x509_setenv_track(const struct x509_track *xt, struct env_set *es,
                             WOLFSSL_ASN1_STRING *val = wolfSSL_X509_NAME_ENTRY_get_data(ent);
                             do_setenv_x509(es, xt->name, val->data, depth);
                         }
-                    }
-#if 0
-                    else {
+                    } else {
                         WOLFSSL_STACK *ext = wolfSSL_X509_get_ext_d2i(x509, xt->nid, NULL, 0);
                         if (ext) {
-
                             for (i = 0; i < wolfSSL_sk_GENERAL_NAME_num(ext); i++) {
-                                WOLFSSL_ASN1_OBJECT *oid = wolfSSL_sk_GENERAL_NAME_value(eku, i);
+                                WOLFSSL_ASN1_OBJECT *oid = wolfSSL_sk_GENERAL_NAME_value(ext, i);
                                 char szOid[1024];
 
                                 if (wolfSSL_OBJ_obj2txt(szOid, sizeof(szOid), oid, 0) > 0) {
-                                    if (!strcmp(expected_oid, szOid)) {
-                                        do_setenv_x509(es, xt->name, szOid, depth);
-                                        break;
-                                    }
-                                }
-                                if (wolfSSL_OBJ_obj2txt(szOid, sizeof(szOid), oid, 1) > 0) {
-                                    msg(D_HANDSHAKE, "++ Certificate has EKU (oid) %s, expects %s",
-                                        szOid, expected_oid);
-                                    if (!strcmp(expected_oid, szOid)) {
-                                        do_setenv_x509(es, xt->name, szOid, depth);
-                                        break;
-                                    }
-                                    if ((desc = oid_translate_num_to_str(szOid)) != NULL) {
-                                        msg(D_HANDSHAKE, "++ oid %s translated to %s",
-                                                szOid, desc);
-                                        if (!strcmp(expected_oid, desc)) {
-                                            do_setenv_x509(es, xt->name, szOid, depth);
-                                            break;
-                                        }
-                                    }
+                                    do_setenv_x509(es, xt->name, szOid, depth);
+                                    break;
+                                } else if (wolfSSL_OBJ_obj2txt(szOid, sizeof(szOid), oid, 1) > 0) {
+                                    do_setenv_x509(es, xt->name, szOid, depth);
+                                    break;
                                 }
                             }
                         }
+                        wolfSSL_sk_ASN1_OBJECT_free(ext);
                     }
-#endif
             }
         }
         xt = xt->next;
