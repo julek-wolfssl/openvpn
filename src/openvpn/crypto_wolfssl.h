@@ -29,6 +29,12 @@
 #ifndef CRYPTO_WOLFSSL_H_
 #define CRYPTO_WOLFSSL_H_
 
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#elif defined(_MSC_VER)
+#include "config-msvc.h"
+#endif
+
 #include <wolfssl/options.h>
 #include <wolfssl/wolfcrypt/logging.h>
 #include <wolfssl/wolfcrypt/wc_port.h>
@@ -269,7 +275,7 @@ typedef struct {
 #endif
     } iv;
 
-#if (defined(HAVE_CHACHA) && defined(HAVE_POLY1305)) || defined(HAVE_AESGCM)
+#ifdef HAVE_AEAD_CIPHER_MODES
     bool aead_updated;
     uint8_t aead_tag[OPENVPN_AEAD_TAG_LENGTH];
 

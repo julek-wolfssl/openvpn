@@ -34,14 +34,13 @@
 #include <wolfssl/wolfcrypt/asn_public.h>
 #include <wolfssl/wolfcrypt/ecc.h>
 #include <wolfssl/wolfcrypt/error-crypt.h>
+#include <wolfssl/wolfcrypt/pkcs12.h>
 #include <wolfssl/openssl/ec.h>
 #include <wolfssl/ssl.h>
 
 #define TLS1_1_VERSION                  0x0302
 #define TLS1_2_VERSION                  0x0303
 #define TLS1_3_VERSION                  0x0304
-
-#define MAX_DH_SIZE ((8192/8)+1)
 
 #define RING_BUF_LEN (1024*30)
 

@@ -80,22 +80,14 @@ int tls_version_max(void) {
 void tls_ctx_server_new(struct tls_root_ctx *ctx) {
     ASSERT(NULL != ctx);
 
-#ifdef WOLFSSL_TLS13
-    ctx->ctx = wolfSSL_CTX_new(wolfTLSv1_3_server_method());
-#else
-    ctx->ctx = wolfSSL_CTX_new(wolfTLSv1_2_server_method());
-#endif
+    ctx->ctx = wolfSSL_CTX_new(wolfSSLv23_server_method());
     check_malloc_return(ctx->ctx);
 }
 
 void tls_ctx_client_new(struct tls_root_ctx *ctx) {
     ASSERT(NULL != ctx);
 
-#ifdef WOLFSSL_TLS13
-    ctx->ctx = wolfSSL_CTX_new(wolfTLSv1_3_client_method());
-#else
-    ctx->ctx = wolfSSL_CTX_new(wolfTLSv1_2_client_method());
-#endif
+    ctx->ctx = wolfSSL_CTX_new(wolfSSLv23_client_method());
     check_malloc_return(ctx->ctx);
 }
 
@@ -103,8 +95,8 @@ void tls_ctx_free(struct tls_root_ctx *ctx) {
     ASSERT(NULL != ctx);
     if (NULL != ctx->ctx) {
     	wolfSSL_CTX_free(ctx->ctx);
+        ctx->ctx = NULL;
     }
-    ctx->ctx = NULL;
 }
 
 bool tls_ctx_initialised(struct tls_root_ctx *ctx) {
@@ -205,7 +197,6 @@ void tls_ctx_load_dh_params(struct tls_root_ctx *ctx, const char *dh_file,
         /* Parameters in memory */
         if ((dh_len = strlen(dh_file_inline)) == 0) {
             msg(M_FATAL, "Empty DH parameters passed.");
-            return;
         }
 
         if ((ret = wolfSSL_CTX_SetTmpDH_buffer(ctx->ctx,
@@ -213,7 +204,6 @@ void tls_ctx_load_dh_params(struct tls_root_ctx *ctx, const char *dh_file,
                                                dh_len,
                                                SSL_FILETYPE_PEM)) != SSL_SUCCESS) {
             msg(M_FATAL, "wolfSSL_CTX_SetTmpDH_buffer failed with Errno: %d", ret);
-            return;
         }
     } else {
         /* Parameters in file */
@@ -221,7 +211,6 @@ void tls_ctx_load_dh_params(struct tls_root_ctx *ctx, const char *dh_file,
                                              dh_file,
                                              SSL_FILETYPE_PEM)) != SSL_SUCCESS) {
             msg(M_FATAL, "wolfSSL_CTX_SetTmpDH_file failed with Errno: %d", ret);
-            return;
         }
     }
 }
@@ -254,23 +243,89 @@ void tls_ctx_load_ecdh_params(struct tls_root_ctx *ctx, const char *curve_name) 
 
 int tls_ctx_load_pkcs12(struct tls_root_ctx *ctx, const char *pkcs12_file,
                         const char *pkcs12_file_inline, bool load_ca_file) {
-    msg(M_FATAL, "NEEDS CHECKING OF INPUT FORMAT %s", __func__);
+    int ret, pkcs12_len, i;
+    struct gc_arena gc = gc_new();
+    struct buffer buf;
+    WC_PKCS12* pkcs12 = wc_PKCS12_new();
+    WOLFSSL_EVP_PKEY* pkey;
+    WOLFSSL_X509* cert;
+    const uint8_t* cert_der;
+    int cert_der_len;
+    WOLFSSL_X509_STORE* store;
+    WOLF_STACK_OF(WOLFSSL_X509)* ca;
 
-#if 0
-    int ret;
     ASSERT(ctx != NULL);
 
     if (!strcmp(pkcs12_file, INLINE_FILE_TAG) && pkcs12_file_inline) {
         /* PKCS12 in memory */
+        if ((pkcs12_len = strlen(pkcs12_file_inline)) == 0) {
+            msg(M_FATAL, "Empty pkcs12 parameters passed.");
+        }
+
+        buf = alloc_buf_gc(pkcs12_len, &gc);
+        if (!buf_valid(&buf)) {
+            msg(M_FATAL, "Error allocating %d bytes for pkcs12 buffer", pkcs12_len);
+        }
+
+        if (!buf_write(&buf, pkcs12_file_inline, pkcs12_len)) {
+            msg(M_FATAL, "Error copying pkcs12 parameters.");
+        }
     } else {
         /* PKCS12 in file */
+        buf = buffer_read_from_file(pkcs12_file, &gc);
+        if (!buf_valid(&buf)) {
+            msg(M_FATAL, "Read error on pkcs12 file ('%s')", pkcs12_file);
+        }
     }
 
-    if ((ret = PemToDer(buf, sz, DH_PARAM_TYPE, &der, ctx->heap,
-                        NULL, NULL)) != 0) {
-
+    if ((ret = wc_d2i_PKCS12(BPTR(&buf), BLEN(&buf), pkcs12)) != 0 ) {
+        msg(M_FATAL, "wc_d2i_PKCS12 failed. Errno: %d", ret);
     }
-#endif
+
+    if (wolfSSL_PKCS12_parse(pkcs12, "password", &pkey, &cert, &ca) != WOLFSSL_SUCCESS) {
+        msg(M_FATAL, "wolfSSL_PKCS12_parse failed.");
+    }
+
+    if (pkey) {
+        if (wolfSSL_CTX_use_PrivateKey(ctx->ctx, pkey) != WOLFSSL_SUCCESS) {
+            msg(M_FATAL, "wolfSSL_CTX_use_PrivateKey failed.");
+        }
+    }
+
+    if (cert) {
+        if (!(cert_der = wolfSSL_X509_get_der(cert, &cert_der_len))) {
+            msg(M_FATAL, "wolfSSL_X509_get_der failed.");
+        }
+        if ((ret = wolfSSL_CTX_use_certificate_buffer(ctx->ctx, cert_der, cert_der_len,
+                                                      WOLFSSL_FILETYPE_ASN1)) != SSL_SUCCESS) {
+            msg(M_FATAL, "wolfSSL_CTX_use_certificate_buffer failed. Errno: %d", ret);
+        }
+    }
+
+    ASSERT(store = wolfSSL_CTX_get_cert_store(ctx->ctx));
+
+    for (i = 0; i < wolfSSL_sk_GENERAL_NAME_num(ca); i++) {
+        WOLFSSL_X509* x509 = wolfSSL_sk_X509_value(ca, i);
+        if (wolfSSL_X509_STORE_add_cert(store, x509) != WOLFSSL_SUCCESS) {
+            msg(M_FATAL, "wolfSSL_X509_STORE_add_cert failed.");
+        }
+    }
+
+    if (pkey) {
+        wolfSSL_EVP_PKEY_free(pkey);
+    }
+    if (cert) {
+        wolfSSL_X509_free(cert);
+    }
+    if (ca) {
+        wolfSSL_sk_X509_free(ca);
+    }
+    if (pkcs12) {
+        wc_PKCS12_free(pkcs12);
+    }
+    gc_free(&gc);
+
+    msg(M_FATAL, "NEEDS CHECKING OF INPUT FORMAT %s", __func__);
     return 1;
 }
 
