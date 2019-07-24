@@ -253,6 +253,7 @@ int tls_ctx_load_pkcs12(struct tls_root_ctx *ctx, const char *pkcs12_file,
     int cert_der_len;
     WOLFSSL_X509_STORE* store;
     WOLF_STACK_OF(WOLFSSL_X509)* ca;
+    char password[256];
 
     ASSERT(ctx != NULL);
 
@@ -282,8 +283,11 @@ int tls_ctx_load_pkcs12(struct tls_root_ctx *ctx, const char *pkcs12_file,
         msg(M_FATAL, "wc_d2i_PKCS12 failed. Errno: %d", ret);
     }
 
-    if (wolfSSL_PKCS12_parse(pkcs12, "password", &pkey, &cert, &ca) != WOLFSSL_SUCCESS) {
-        msg(M_FATAL, "wolfSSL_PKCS12_parse failed.");
+    if (wolfSSL_PKCS12_parse(pkcs12, "", &pkey, &cert, &ca) != WOLFSSL_SUCCESS) {
+        pem_password_callback(password, sizeof(password) - 1, 0, NULL);
+        if (wolfSSL_PKCS12_parse(pkcs12, password, &pkey, &cert, &ca) != WOLFSSL_SUCCESS) {
+            msg(M_FATAL, "wolfSSL_PKCS12_parse failed.");
+        }
     }
 
     if (pkey) {
@@ -325,8 +329,7 @@ int tls_ctx_load_pkcs12(struct tls_root_ctx *ctx, const char *pkcs12_file,
     }
     gc_free(&gc);
 
-    msg(M_FATAL, "NEEDS CHECKING OF INPUT FORMAT %s", __func__);
-    return 1;
+    return 0;
 }
 
 #ifdef ENABLE_CRYPTOAPI
@@ -336,8 +339,7 @@ tls_ctx_load_cryptoapi(struct tls_root_ctx *ctx, const char *cryptoapi_cert)
     ASSERT(NULL != ctx);
 
     /* Load Certificate and Private Key */
-    if (!SSL_CTX_use_CryptoAPI_certificate(ctx->ctx, cryptoapi_cert))
-    {
+    if (!SSL_CTX_use_CryptoAPI_certificate(ctx->ctx, cryptoapi_cert)) {
         crypto_msg(M_FATAL, "Cannot load certificate \"%s\" from Microsoft Certificate Store", cryptoapi_cert);
     }
 }
@@ -355,7 +357,18 @@ void tls_ctx_load_cert_file(struct tls_root_ctx *ctx, const char *cert_file,
             msg(M_FATAL, "Empty certificate passed.");
             return;
         }
-
+        /*
+         * Load certificate.
+         */
+        if ((ret = wolfSSL_CTX_use_certificate_chain_buffer(ctx->ctx,
+                                                            (uint8_t*) cert_file_inline,
+                                                            cert_len)) != SSL_SUCCESS ) {
+            msg(M_FATAL, "wolfSSL_CTX_use_certificate_buffer failed with Errno: %d", ret);
+            return;
+        }
+        /*
+         * Load any additional certificates.
+         */
         if ((ret = wolfSSL_CTX_load_verify_buffer(ctx->ctx,
                                                   (uint8_t*) cert_file_inline,
                                                   cert_len,
@@ -363,26 +376,22 @@ void tls_ctx_load_cert_file(struct tls_root_ctx *ctx, const char *cert_file,
             msg(M_FATAL, "wolfSSL_CTX_load_verify_buffer failed with Errno: %d", ret);
             return;
         }
-//        if ((ret = wolfSSL_CTX_use_certificate_chain_buffer(ctx->ctx,
-//                                                            (uint8_t*) cert_file_inline,
-//                                                            cert_len)) != SSL_SUCCESS ) {
-//            msg(M_FATAL, "wolfSSL_CTX_use_certificate_buffer failed with Errno: %d", ret);
-//            return;
-//        }
     } else {
         /* Certificate in file */
-//        if ((ret = wolfSSL_CTX_load_verify_locations(ctx->ctx, cert_file, NULL)) != SSL_SUCCESS ) {
-//            msg(M_FATAL, "wolfSSL_CTX_load_verify_locations failed with Errno: %d", ret);
-//            return;
-//        }
-        if ((ret = wolfSSL_CTX_use_certificate_file(ctx->ctx, cert_file, SSL_FILETYPE_PEM)) != SSL_SUCCESS ) {
-            msg(M_FATAL, "wolfSSL_CTX_use_certificate_file failed with Errno: %d", ret);
+        /*
+         * Load certificate.
+         */
+        if ((ret = wolfSSL_CTX_use_certificate_chain_file(ctx->ctx, cert_file)) != SSL_SUCCESS ) {
+            msg(M_FATAL, "wolfSSL_CTX_use_certificate_chain_file failed with Errno: %d", ret);
             return;
         }
-//        if ((ret = wolfSSL_CTX_use_certificate_chain_file(ctx->ctx, cert_file)) != SSL_SUCCESS ) {
-//            msg(M_FATAL, "wolfSSL_CTX_use_certificate_chain_file failed with Errno: %d", ret);
-//            return;
-//        }
+        /*
+         * Load any additional certificates.
+         */
+        if ((ret = wolfSSL_CTX_load_verify_locations(ctx->ctx, cert_file, NULL)) != SSL_SUCCESS ) {
+            msg(M_FATAL, "wolfSSL_CTX_load_verify_locations failed with Errno: %d", ret);
+            return;
+        }
     }
 }
 
@@ -435,7 +444,6 @@ void tls_ctx_load_ca(struct tls_root_ctx *ctx, const char *ca_file,
         /* Certificate in memory */
         if ((ca_len = strlen(ca_file_inline)) == 0) {
             msg(M_FATAL, "Empty certificate passed.");
-            return;
         }
 
         if ((ret = wolfSSL_CTX_load_verify_buffer(ctx->ctx,
@@ -443,60 +451,23 @@ void tls_ctx_load_ca(struct tls_root_ctx *ctx, const char *ca_file,
                                                   ca_len,
                                                   SSL_FILETYPE_PEM)) != SSL_SUCCESS ) {
             msg(M_FATAL, "wolfSSL_CTX_load_verify_buffer failed with Errno: %d", ret);
-            return;
         }
-//        if ((ret = wolfSSL_CTX_use_certificate_chain_buffer(ctx->ctx,
-//                                                            (uint8_t*) ca_file_inline,
-//                                                            ca_len)) != SSL_SUCCESS ) {
-//            msg(M_FATAL, "wolfSSL_CTX_use_certificate_buffer failed with Errno: %d", ret);
-//            return;
-//        }
+        if (ca_path) {
+            if ((ret = wolfSSL_CTX_load_verify_locations(ctx->ctx, NULL, ca_path)) != SSL_SUCCESS ) {
+                msg(M_FATAL, "wolfSSL_CTX_load_verify_locations failed with Errno: %d", ret);
+            }
+        }
     } else {
         /* Certificate in file */
-        if ((ret = wolfSSL_CTX_load_verify_locations(ctx->ctx, ca_file, NULL)) != SSL_SUCCESS ) {
+        if ((ret = wolfSSL_CTX_load_verify_locations(ctx->ctx, ca_file, ca_path)) != SSL_SUCCESS ) {
             msg(M_FATAL, "wolfSSL_CTX_load_verify_locations failed with Errno: %d", ret);
-            return;
-        }
-//        if ((ret = wolfSSL_CTX_use_certificate_chain_file(ctx->ctx, ca_file)) != SSL_SUCCESS ) {
-//            msg(M_FATAL, "wolfSSL_CTX_use_certificate_chain_file failed with Errno: %d", ret);
-//            return;
-//        }
-    }
-
-    if (ca_path) {
-        if ((ret = wolfSSL_CTX_load_verify_locations(ctx->ctx, NULL, ca_path)) != SSL_SUCCESS ) {
-            msg(M_FATAL, "wolfSSL_CTX_load_verify_locations failed with Errno: %d", ret);
-            return;
         }
     }
 }
 
 void tls_ctx_load_extra_certs(struct tls_root_ctx *ctx, const char *extra_certs_file,
                               const char *extra_certs_file_inline) {
-    int extra_cert_len, ret;
-
-    ASSERT(ctx != NULL);
-
-    if (!strcmp(extra_certs_file, INLINE_FILE_TAG) && extra_certs_file_inline) {
-        /* Certificate in memory */
-        if ((extra_cert_len = strlen(extra_certs_file_inline)) == 0) {
-            msg(M_FATAL, "Empty certificate passed.");
-            return;
-        }
-
-        if ((ret = wolfSSL_CTX_use_certificate_chain_buffer(ctx->ctx,
-                                                            (uint8_t*) extra_certs_file_inline,
-                                                            extra_cert_len)) != SSL_SUCCESS ) {
-            msg(M_FATAL, "wolfSSL_CTX_use_certificate_buffer failed with Errno: %d", ret);
-            return;
-        }
-    } else {
-        /* Certificate in file */
-        if ((ret = wolfSSL_CTX_use_certificate_chain_file(ctx->ctx, extra_certs_file)) != SSL_SUCCESS ) {
-            msg(M_FATAL, "wolfSSL_CTX_use_certificate_chain_file failed with Errno: %d", ret);
-            return;
-        }
-    }
+    tls_ctx_load_ca(ctx, extra_certs_file, extra_certs_file_inline, NULL, false);
 }
 
 /* **************************************
@@ -564,72 +535,95 @@ void hexDump (char *desc, const void *addr, int len) {
  */
 
 static int ssl_buff_read(WOLFSSL *ssl, char *buf, int sz, void *ctx) {
-    struct ring_buffer_t* ssl_buf = (struct ring_buffer_t*)ctx;
-    uint32_t len = sz < ssl_buf->len ? sz : ssl_buf->len;
+    struct list_buffer_t* ssl_buf = (struct list_buffer_t*)ctx;
+    struct bucket_t* b;
+    uint32_t l, ret = 0, len = sz;
 
-    if (len == 0) {
+    if (!ssl_buf->first) {
         return WOLFSSL_CBIO_ERR_WANT_READ;
     }
 
-    if (ssl_buf->offset + len <= RING_BUF_LEN) {
-        /* The data to be read does not wrap around the edge of the buffer */
-        memcpy(buf, ssl_buf->buf + ssl_buf->offset, len);
-    } else {
-        /* The data wraps around the end to the beginning of the buffer */
-        msg(M_INFO, "READ ring buffer is wrapping around.");
-        uint32_t partial_len = RING_BUF_LEN - ssl_buf->offset;
-        memcpy(buf, ssl_buf->buf + ssl_buf->offset, partial_len);
-        memcpy(buf + partial_len, ssl_buf->buf, len - partial_len);
+    while (len && ssl_buf->first) {
+        l = MIN(len, ssl_buf->first->len);
+        memcpy(buf, ssl_buf->first->buf + ssl_buf->first->offset, l);
+        ssl_buf->first->offset += l;
+        ssl_buf->first->len -= l;
+        len -= l;
+        buf += l;
+        ret += l;
+        ssl_buf->len -= l;
+        if (ssl_buf->first->len == 0) {
+            /* Bucket is wholly read */
+            b = ssl_buf->first;
+            ssl_buf->first = ssl_buf->first->next;
+            free(b);
+        }
     }
-    ssl_buf->offset += len;
-    ssl_buf->offset %= RING_BUF_LEN;
-    ssl_buf->len -= len;
 
-    msg(M_INFO, "Buffer read from.\n"
-                "Bytes read: %d\n"
-                "Buffer space: %d/%d\n"
-                "sz was: %d", len, ssl_buf->len, RING_BUF_LEN, sz);
-    hexDump("ssl_buff_read", buf, len);
+    if (!ssl_buf->first) {
+        ssl_buf->last = NULL;
+    }
 
-    return len;
+    return ret;
 }
 
 static int ssl_buff_write(WOLFSSL *ssl, char *buf, int sz, void *ctx) {
-    struct ring_buffer_t* ssl_buf = (struct ring_buffer_t*)ctx;
-    uint32_t len = sz;
+    struct list_buffer_t* ssl_buf = (struct list_buffer_t*)ctx;
+    uint32_t l, len = sz;
 
     if (len == 0) {
         return 0;
     }
 
-    if (len > RING_BUF_LEN) {
-        msg(M_FATAL, "Ring buffer is too small to hold all data.");
-    }
-
-    if (ssl_buf->len + len > RING_BUF_LEN) {
-        return WOLFSSL_CBIO_ERR_WANT_WRITE;
-    }
-
-    if (ssl_buf->offset + ssl_buf->len + len < RING_BUF_LEN) {
-        /* The data to be sent will not wrap around the edge of the buffer */
-        memcpy(ssl_buf->buf + ssl_buf->offset + ssl_buf->len, buf, len);
-    } else {
-        /* The data will wrap around the end to the beginning of the buffer */
-        msg(M_INFO, "WRITE ring buffer is wrapping around.");
-        uint32_t partial_len = RING_BUF_LEN - (ssl_buf->offset + ssl_buf->len);
-        memcpy(ssl_buf->buf + ssl_buf->offset + ssl_buf->len, buf, partial_len);
-        memcpy(ssl_buf->buf, buf + partial_len, len - partial_len);
-    }
     ssl_buf->len += len;
 
-    msg(M_INFO, "Buffer written to.\n"
-                "Bytes written: %d\n"
-                "Buffer space: %d/%d", len, ssl_buf->len, RING_BUF_LEN);
-    if (ssl_buf->offset + ssl_buf->len <= RING_BUF_LEN) {
-        hexDump("ssl_buff_write", ssl_buf->buf + ssl_buf->offset, ssl_buf->len);
+    if (!ssl_buf->first) {
+        ssl_buf->first = ssl_buf->last = (struct bucket_t*) malloc(sizeof(struct bucket_t));
+        check_malloc_return(ssl_buf->first);
+
+        l = MIN(len, BUCKET_BUF_LEN);
+        ssl_buf->first->len = l;
+        ssl_buf->first->offset = 0;
+        ssl_buf->first->next = NULL;
+        memcpy(ssl_buf->first->buf, buf, l);
+
+        if (len <= BUCKET_BUF_LEN) {
+            return sz;
+        }
+
+        len -= l;
+        buf += l;
     }
 
-    return len;
+    while (len) {
+        l = MIN(len, BUCKET_BUF_LEN - ssl_buf->last->len - ssl_buf->last->offset);
+        if (l) {
+            /* If there is any room in the last bucket then copy */
+            memcpy(ssl_buf->last->buf + ssl_buf->last->offset + ssl_buf->last->len, buf, l);
+            len -= l;
+            buf += l;
+            ssl_buf->last->len += l;
+        }
+
+        if (!len) {
+            /* No more data to write */
+            break;
+        }
+
+        ssl_buf->last = ssl_buf->last->next = (struct bucket_t*) malloc(sizeof(struct bucket_t));
+        check_malloc_return(ssl_buf->last);
+
+        l = MIN(len, BUCKET_BUF_LEN);
+        ssl_buf->last->len = l;
+        ssl_buf->last->offset = 0;
+        ssl_buf->last->next = NULL;
+        memcpy(ssl_buf->last->buf, buf, l);
+
+        len -= l;
+        buf += l;
+    }
+
+    return sz;
 }
 
 void key_state_ssl_init(struct key_state_ssl *ks_ssl,
@@ -644,13 +638,13 @@ void key_state_ssl_init(struct key_state_ssl *ks_ssl,
     }
 
     if ((ks_ssl->send_buf =
-            (struct ring_buffer_t*) calloc(sizeof(struct ring_buffer_t), 1)) == NULL) {
+            (struct list_buffer_t*) calloc(sizeof(struct list_buffer_t), 1)) == NULL) {
         wolfSSL_free(ks_ssl->ssl);
         msg(M_FATAL, "Failed to allocate memory for send buffer.");
     }
 
     if ((ks_ssl->recv_buf =
-            (struct ring_buffer_t*) calloc(sizeof(struct ring_buffer_t), 1)) == NULL) {
+            (struct list_buffer_t*) calloc(sizeof(struct list_buffer_t), 1)) == NULL) {
         free(ks_ssl->send_buf);
         wolfSSL_free(ks_ssl->ssl);
         msg(M_FATAL, "Failed to allocate memory for receive buffer.");
@@ -693,11 +687,25 @@ void key_state_ssl_init(struct key_state_ssl *ks_ssl,
 }
 
 void key_state_ssl_free(struct key_state_ssl *ks_ssl) {
+    struct bucket_t* b;
+    struct bucket_t* c;
     wolfSSL_free(ks_ssl->ssl);
     if (ks_ssl->recv_buf) {
+        b = ks_ssl->recv_buf->first;
+        while (b) {
+            c = b->next;
+            free(b);
+            b = c;
+        }
         free(ks_ssl->recv_buf);
     }
     if (ks_ssl->send_buf) {
+        b = ks_ssl->send_buf->first;
+        while (b) {
+            c = b->next;
+            free(b);
+            b = c;
+        }
         free(ks_ssl->send_buf);
     }
     ks_ssl->ssl = NULL;

@@ -42,17 +42,28 @@
 #define TLS1_2_VERSION                  0x0303
 #define TLS1_3_VERSION                  0x0304
 
-#define RING_BUF_LEN (1024*30)
+#define BUCKET_BUF_LEN (1024*5)
 
-/* TODO
- * Implement the buffer using a linked list with smaller buffers as elements
- * of the linked list so that it will expand and contract in size according
- * to how much memory is needed.
- * */
-struct ring_buffer_t {
-    uint8_t buf[RING_BUF_LEN];
+/*
+ * The len and offset members refer to the length and offset within a bucket.
+ * Each bucket can hold up to BUCKET_BUF_LEN data.
+ */
+struct bucket_t {
     uint32_t len;
     uint32_t offset;
+    struct bucket_t* next;
+    uint8_t buf[BUCKET_BUF_LEN];
+};
+
+/*
+ * The buffer uses a list of buckets to hold data. This way the optimal amount
+ * of space is used (buckets are malloc'ed and free'd accordingly). The len
+ * member tracks the overall length of available data across all buckets.
+ */
+struct list_buffer_t {
+    uint32_t len;
+    struct bucket_t* first;
+    struct bucket_t* last;
 };
 
 /**
@@ -67,8 +78,8 @@ struct tls_root_ctx {
 
 struct key_state_ssl {
     WOLFSSL *ssl;
-    struct ring_buffer_t *send_buf;
-    struct ring_buffer_t *recv_buf;
+    struct list_buffer_t *send_buf;
+    struct list_buffer_t *recv_buf;
     struct tls_session *session;
 };
 
