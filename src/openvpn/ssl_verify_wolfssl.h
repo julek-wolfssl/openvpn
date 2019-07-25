@@ -40,6 +40,8 @@
 typedef WOLFSSL_X509 openvpn_x509_cert_t;
 #endif
 
+#define NID_sha256 672
+#define NID_sha1   64
 
 /**
  * Verify that the remote OpenVPN peer's certificate allows setting up a

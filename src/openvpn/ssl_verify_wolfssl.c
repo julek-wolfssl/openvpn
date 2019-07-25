@@ -67,10 +67,8 @@ char *x509_get_subject(openvpn_x509_cert_t *cert, struct gc_arena *gc) {
     }
     subject_len = wolfSSL_X509_NAME_get_sz(name);
 
-    subject = gc_malloc(subject_len + 1, FALSE, gc);
+    subject = gc_malloc(subject_len, FALSE, gc);
     check_malloc_return(subject);
-
-    subject[subject_len] = '\0';
 
     return wolfSSL_X509_NAME_oneline(name, subject, subject_len);
 }
@@ -86,7 +84,7 @@ struct buffer x509_get_sha1_fingerprint(openvpn_x509_cert_t *cert,
     return hash;
 }
 
-struct buffer x509_get_sha256_fingerprint(X509 *cert, struct gc_arena *gc) {
+struct buffer x509_get_sha256_fingerprint(openvpn_x509_cert_t *cert, struct gc_arena *gc) {
     unsigned int hashSz = wc_HashGetDigestSize(WC_HASH_TYPE_SHA256);
     struct buffer hash = alloc_buf_gc(hashSz, gc);
     check_malloc_return(BPTR(&hash));
@@ -98,20 +96,39 @@ struct buffer x509_get_sha256_fingerprint(X509 *cert, struct gc_arena *gc) {
 
 result_t backend_x509_get_username(char *common_name, int cn_len,
                                    char *x509_username_field, openvpn_x509_cert_t *peer_cert) {
+    result_t res = FAILURE;
+
+    char *subject = NULL;
 #ifdef ENABLE_X509ALTUSERNAME
+    WOLFSSL_STACK *ext = NULL;
     if (strncmp("ext:",x509_username_field,4) == 0) {
-        ASSERT(0);
+        int i;
+        int nid;
+        char szOid[1024];
+
+        nid = wolfSSL_OBJ_txt2nid(x509_username_field + 4);
+        ext = wolfSSL_X509_get_ext_d2i(peer_cert, nid, NULL, NULL);
+        if (ext) {
+            for (i = 0; i < wolfSSL_sk_GENERAL_NAME_num(ext); i++) {
+                WOLFSSL_ASN1_OBJECT *name = wolfSSL_sk_GENERAL_NAME_value(ext, i);
+                if (wolfSSL_OBJ_obj2txt(szOid, sizeof(szOid), name, 0) > 0) {
+                    strncpy(common_name, szOid, cn_len);
+                    break;
+                }
+            }
+        } else {
+            goto failure;
+        }
     } else
 #endif
     {
-        char *subject;
         char *c;
         char *start_pos;
         int field_len = strlen(x509_username_field);
         int value_len;
         WOLFSSL_X509_NAME* name = wolfSSL_X509_get_subject_name(peer_cert);
         if (!name) {
-            return FAILURE;
+            goto failure;
         }
         subject = wolfSSL_X509_NAME_oneline(name, NULL, 0);
 
@@ -120,15 +137,25 @@ result_t backend_x509_get_username(char *common_name, int cn_len,
                 c += field_len; // increment to value of field
                 start_pos = c + 1;
                 while (*(++c) != '/' && *c != '\0'); // inc to next slash
-                value_len = MIN(c-start_pos, cn_len);
+                value_len = MIN(c-start_pos, cn_len-1);
                 memcpy(common_name, start_pos, value_len);
+                common_name[value_len] = '\0';
                 break;
             }
         }
+    }
 
+    res = SUCCESS;
+failure:
+    if (subject) {
         free(subject);
     }
-    return SUCCESS;
+#ifdef ENABLE_X509ALTUSERNAME
+    if (ext) {
+        wolfSSL_sk_ASN1_OBJECT_free(ext);
+    }
+#endif
+    return res;
 }
 
 #ifdef ENABLE_X509ALTUSERNAME
@@ -144,23 +171,19 @@ bool x509_username_field_ext_supported(const char *extname) {
 
 char *backend_x509_get_serial(openvpn_x509_cert_t *cert, struct gc_arena *gc) {
     uint8_t buf[EXTERNAL_SERIAL_SIZE];
-    int buf_len = EXTERNAL_SERIAL_SIZE, ret, i, j, radix_size;
+    int buf_len = EXTERNAL_SERIAL_SIZE, ret, radix_size;
     mp_int big_num;
     struct buffer dec_string;
 
+    /*
+     * The serial number buffer is in big endian.
+     */
     if ((ret = wolfSSL_X509_get_serial_number(cert, buf, &buf_len)) != WOLFSSL_SUCCESS) {
         msg(M_FATAL, "wolfSSL_X509_get_serial_number failed with Errno: %d", ret);
     }
 
     if (mp_init(&big_num) != MP_OKAY) {
         msg(M_FATAL, "mp_init failed");
-    }
-
-    /* reverse byte order (make big endian) */
-    for (i=0, j=buf_len-1; i < j; i++, j--) {
-      int temp = buf[i];
-      buf[i] = buf[j];
-      buf[j] = temp;
     }
 
     if ((ret = mp_read_unsigned_bin(&big_num, buf, buf_len)) != MP_OKAY) {
@@ -178,33 +201,24 @@ char *backend_x509_get_serial(openvpn_x509_cert_t *cert, struct gc_arena *gc) {
         msg(M_FATAL, "mp_todecimal failed with Errno: %d", ret);
     }
 
+    dec_string.len = radix_size;
+
     return (char*) BPTR(&dec_string);
 }
 
 char *backend_x509_get_serial_hex(openvpn_x509_cert_t *cert,
                                   struct gc_arena *gc) {
     uint8_t buf[EXTERNAL_SERIAL_SIZE];
-    int buf_len = EXTERNAL_SERIAL_SIZE, ret, i, j;
-    struct buffer hex_string;
-    char* s;
+    int buf_len = EXTERNAL_SERIAL_SIZE, ret;
 
+    /*
+     * The serial number buffer is in big endian.
+     */
     if ((ret = wolfSSL_X509_get_serial_number(cert, buf, &buf_len)) != WOLFSSL_SUCCESS) {
         msg(M_FATAL, "wolfSSL_X509_get_serial_number failed with Errno: %d", ret);
     }
 
-    hex_string = alloc_buf_gc((buf_len * 2) + 1, gc);
-    check_malloc_return(BPTR(&hex_string));
-    s = (char*) BPTR(&hex_string);
-
-    for (i = buf_len-1, j=0; i>=0; i--, j++) {
-        if (sprintf(&s[j*2], "%02X", buf[i]) < 0) {
-            msg(M_FATAL, "sprintf in %s failed", __func__);
-        }
-    }
-
-    /* sprintf should have added the null terminator */
-    ASSERT(s[buf_len * 2] == '\0');
-    return s;
+    return format_hex_ex(buf, buf_len, 0, 1, ":", gc);
 }
 
 void x509_setenv(struct env_set *es, int cert_depth, openvpn_x509_cert_t *cert) {
@@ -228,11 +242,11 @@ void x509_setenv(struct env_set *es, int cert_depth, openvpn_x509_cert_t *cert) 
         ASSERT(*c == '/'); // c should point to slash on each loop
 
         name_start_pos = c + 1;
-        while (*(++c) != '=' && *c != '\0'); // inc to equals sign
+        while (*(++c) != '=' && *c != '\0'); // increment to equals sign
         name_len = c - name_start_pos;
 
         value_start_pos = c + 1;
-        while (*(++c) != '/' && *c != '\0'); // inc to next slash
+        while (*(++c) != '/' && *c != '\0'); // increment to next slash
         value_len = c - value_start_pos;
 
         /*
@@ -314,7 +328,6 @@ void x509_setenv_track(const struct x509_track *xt, struct env_set *es,
     WOLFSSL_X509_NAME *x509_name = wolfSSL_X509_get_subject_name(x509);
     while (xt) {
         if (depth == 0 || (xt->flags & XT_FULL_CHAIN)) {
-
             switch (xt->nid)
             {
                 case NID_sha1:
@@ -337,7 +350,7 @@ void x509_setenv_track(const struct x509_track *xt, struct env_set *es,
                             do_setenv_x509(es, xt->name, val->data, depth);
                         }
                     } else {
-                        WOLFSSL_STACK *ext = wolfSSL_X509_get_ext_d2i(x509, xt->nid, NULL, 0);
+                        WOLFSSL_STACK *ext = wolfSSL_X509_get_ext_d2i(x509, xt->nid, NULL, NULL);
                         if (ext) {
                             for (i = 0; i < wolfSSL_sk_GENERAL_NAME_num(ext); i++) {
                                 WOLFSSL_ASN1_OBJECT *oid = wolfSSL_sk_GENERAL_NAME_value(ext, i);
@@ -392,22 +405,22 @@ result_t x509_verify_cert_ku(openvpn_x509_cert_t *x509, const unsigned *const ex
     }
 
     msg(D_HANDSHAKE, "Validating certificate key usage");
-    result_t fFound = FAILURE;
+    result_t found = FAILURE;
     for (size_t i = 0; i < expected_len; i++) {
         if (expected_ku[i] != 0 && (ku & expected_ku[i]) == expected_ku[i]) {
-            fFound = SUCCESS;
+            found = SUCCESS;
             break;
         }
     }
 
-    if (fFound != SUCCESS) {
+    if (found != SUCCESS) {
         msg(D_TLS_ERRORS, "ERROR: Certificate has key usage %04x, expected one of:", ku);
         for (size_t i = 0; i < expected_len && expected_ku[i]; i++) {
             msg(D_TLS_ERRORS, " * %04x", expected_ku[i]);
         }
     }
 
-    return fFound;
+    return found;
 }
 
 static const char* oid_translate_num_to_str(const char* oid) {
@@ -443,7 +456,6 @@ result_t x509_verify_cert_eku(openvpn_x509_cert_t *x509, const char *const expec
         msg(D_HANDSHAKE, "Certificate does not have extended key usage extension");
     } else {
         int i;
-
         msg(D_HANDSHAKE, "Validating certificate extended key usage");
         for (i = 0; i < wolfSSL_sk_GENERAL_NAME_num(eku); i++) {
             WOLFSSL_ASN1_OBJECT *oid = wolfSSL_sk_GENERAL_NAME_value(eku, i);

@@ -869,7 +869,11 @@ void show_available_tls_ciphers_list(const char *cipher_list,
         msg(M_FATAL, "wolfSSL_new failed");
     }
     for (i=0; (cipher=wolfSSL_get_cipher_list_ex(ssl, i)); i++) {
-        printf("%s\n", cipher);
+        if (tls13 && !strncmp(cipher, "TLS13-", 6)) {
+            printf("%s\n", cipher);
+        } else if (!tls13 && strncmp(cipher, "TLS13-", 6)) {
+            printf("%s\n", cipher);
+        }
     }
 }
 
