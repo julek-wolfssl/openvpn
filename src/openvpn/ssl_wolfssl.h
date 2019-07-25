@@ -59,6 +59,8 @@ struct bucket_t {
  * The buffer uses a list of buckets to hold data. This way the optimal amount
  * of space is used (buckets are malloc'ed and free'd accordingly). The len
  * member tracks the overall length of available data across all buckets.
+ * The granularity of BUCKET_BUF_LEN avoids malloc'ing too much memory or calling
+ * malloc too often.
  */
 struct list_buffer_t {
     uint32_t len;

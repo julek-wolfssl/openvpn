@@ -476,58 +476,6 @@ void tls_ctx_load_extra_certs(struct tls_root_ctx *ctx, const char *extra_certs_
  *
  * **************************************/
 
-void hexDump (char *desc, const void *addr, int len) {
-    int i;
-    unsigned char buff[17];
-    unsigned char *pc = (unsigned char*)addr;
-
-    // Output description if given.
-    if (desc != NULL)
-        printf ("%s:\n", desc);
-
-    if (len == 0) {
-        printf("  ZERO LENGTH\n");
-        return;
-    }
-    if (len < 0) {
-        printf("  NEGATIVE LENGTH: %i\n",len);
-        return;
-    }
-
-    // Process every byte in the data.
-    for (i = 0; i < len; i++) {
-        // Multiple of 16 means new line (with line offset).
-
-        if ((i % 16) == 0) {
-            // Just don't print ASCII for the zeroth line.
-            if (i != 0)
-                printf ("  %s\n", buff);
-
-            // Output the offset.
-            printf ("  %04x ", i);
-        }
-
-        // Now the hex code for the specific character.
-        printf (" %02x", pc[i]);
-
-        // And store a printable ASCII character for later.
-        if ((pc[i] < 0x20) || (pc[i] > 0x7e))
-            buff[i % 16] = '.';
-        else
-            buff[i % 16] = pc[i];
-        buff[(i % 16) + 1] = '\0';
-    }
-
-    // Pad out last line if not exactly 16 characters.
-    while ((i % 16) != 0) {
-        printf ("   ");
-        i++;
-    }
-
-    // And print the final ASCII bit.
-    printf ("  %s\n", buff);
-}
-
 /*
  * SSL is handled by library (wolfSSL in this case) but data is dumped
  * to buffers instead of being sent directly through TCP sockets. OpenVPN
@@ -561,6 +509,7 @@ static int ssl_buff_read(WOLFSSL *ssl, char *buf, int sz, void *ctx) {
     }
 
     if (!ssl_buf->first) {
+        /* All buckets have been freed */
         ssl_buf->last = NULL;
     }
 
@@ -721,7 +670,6 @@ void backend_tls_ctx_reload_crl(struct tls_root_ctx *ssl_ctx,
         /* CRL in memory */
         if ((len = strlen(crl_inline)) == 0) {
             msg(M_FATAL, "Empty CRL passed.");
-            return;
         }
         if ((ret = wolfSSL_CTX_LoadCRLBuffer(ssl_ctx->ctx, (unsigned char*)crl_inline,
                                              len, SSL_FILETYPE_PEM)) != SSL_SUCCESS) {
@@ -777,24 +725,21 @@ int key_state_write_plaintext_const(struct key_state_ssl *ks_ssl,
     ASSERT(ks_ssl != NULL);
 
     if (len > 0) {
-        msg(M_INFO, "Enter key_state_write_plaintext_const");
         if ((err = wolfSSL_write(ks_ssl->ssl, data, len)) != len) {
             err = wolfSSL_get_error(ks_ssl->ssl, err);
             switch (err) {
             case WOLFSSL_ERROR_WANT_WRITE:
             case WOLFSSL_ERROR_WANT_READ:
                 ret = 0;
-                goto cleanup;
+                break;
             default:
                 msg(M_WARN, "wolfSSL_write failed with Error: %s", wc_GetErrorString(err));
                 ret =  -1;
-                goto cleanup;
+                break;
             }
         }
-        hexDump("key_state_write_plaintext", data, len);
     }
 
-cleanup:
     perf_pop();
     return ret;
 }
@@ -810,9 +755,6 @@ int key_state_read_ciphertext(struct key_state_ssl *ks_ssl, struct buffer *buf,
     }
 
     ASSERT(ks_ssl != NULL);
-    if (ks_ssl->send_buf->len) {
-        msg(M_INFO, "Enter key_state_read_ciphertext");
-    }
     buf->len = ssl_buff_read(ks_ssl->ssl, (char*)BPTR(buf), maxlen, ks_ssl->send_buf);
 
     ret = buf->len > 0 ? 1 : 0;
@@ -831,7 +773,6 @@ int key_state_write_ciphertext(struct key_state_ssl *ks_ssl,
     ASSERT(ks_ssl != NULL);
 
     if (BLEN(buf) > 0) {
-        msg(M_INFO, "Enter key_state_write_ciphertext");
         if ((err = (ssl_buff_write(ks_ssl->ssl, (char*) BPTR(buf),
                                    BLEN(buf), ks_ssl->recv_buf))) != BLEN(buf)) {
             ret = 0;
@@ -858,10 +799,6 @@ int key_state_read_plaintext(struct key_state_ssl *ks_ssl, struct buffer *buf,
         goto cleanup;
     }
 
-    if (ks_ssl->recv_buf->len) {
-        msg(M_INFO, "Enter key_state_read_plaintext");
-    }
-
     if ((err = wolfSSL_read(ks_ssl->ssl, BPTR(buf), maxlen)) < 0) {
         err = wolfSSL_get_error(ks_ssl->ssl, err);
         switch (err) {
@@ -875,7 +812,6 @@ int key_state_read_plaintext(struct key_state_ssl *ks_ssl, struct buffer *buf,
             goto cleanup;
         }
     }
-    hexDump("key_state_read_plaintext", BPTR(buf), err);
     buf->len = err;
 
 cleanup:
@@ -908,9 +844,21 @@ void show_available_tls_ciphers_list(const char *cipher_list,
     WOLFSSL *ssl;
     WOLFSSL_CTX *ctx;
 
-    if ((ctx = wolfSSL_CTX_new(wolfTLSv1_2_client_method())) == NULL){
-        wolfSSL_CTX_free(ctx);
-        msg(M_FATAL, "wolfSSL_CTX_new failed");
+#ifdef WOLFSSL_TLS13
+    if (tls13) {
+        if ((ctx = wolfSSL_CTX_new(wolfTLSv1_3_client_method())) == NULL){
+            wolfSSL_CTX_free(ctx);
+            msg(M_FATAL, "wolfSSL_CTX_new failed");
+        }
+    } else
+#else
+        msg(M_FATAL, "wolfSSL library compiled without TLS 1.3 support.");
+#endif
+    {
+        if ((ctx = wolfSSL_CTX_new(wolfSSLv23_client_method())) == NULL){
+            wolfSSL_CTX_free(ctx);
+            msg(M_FATAL, "wolfSSL_CTX_new failed");
+        }
     }
     if (cipher_list) {
         if (wolfSSL_CTX_set_cipher_list(ctx, cipher_list) != SSL_SUCCESS) {
@@ -942,7 +890,7 @@ void get_highest_preference_tls_cipher(char *buf, int size) {
     WOLFSSL_CTX* ctx;
     const char* cipher_name;
 
-    if ((ctx = wolfSSL_CTX_new(wolfTLSv1_2_client_method())) == NULL){
+    if ((ctx = wolfSSL_CTX_new(wolfSSLv23_client_method())) == NULL){
         wolfSSL_CTX_free(ctx);
         msg(M_FATAL, "wolfSSL_CTX_new failed");
     }
