@@ -104,6 +104,20 @@ bool tls_ctx_initialised(struct tls_root_ctx *ctx) {
     return NULL != ctx->ctx;
 }
 
+#define ECC_NO_VERIFY
+
+#ifdef ECC_NO_VERIFY
+static int ecc_verify_cb(WOLFSSL* ssl,
+       const unsigned char* sig, unsigned int sigSz,
+       const unsigned char* hash, unsigned int hashSz,
+       const unsigned char* keyDer, unsigned int keySz,
+       int* result, void* ctx) {
+    /* TODO Figure out a way to properly verify an ECC hash */
+    *result = 1;
+    return 0;
+}
+#endif
+
 bool tls_ctx_set_options(struct tls_root_ctx *ctx, unsigned int ssl_flags) {
     int ret = SSL_SUCCESS;
     int verify_flags = WOLFSSL_VERIFY_PEER | WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT;
@@ -132,9 +146,21 @@ bool tls_ctx_set_options(struct tls_root_ctx *ctx, unsigned int ssl_flags) {
         msg(M_FATAL, "wolfSSL_CTX_SetMinVersion failed");
     }
 
-    if (((ssl_flags >> SSLF_TLS_VERSION_MAX_SHIFT) & SSLF_TLS_VERSION_MAX_MASK) != TLS_VER_UNSPEC &&
-        ((ssl_flags >> SSLF_TLS_VERSION_MAX_SHIFT) & SSLF_TLS_VERSION_MAX_MASK) != TLS_VER_BAD) {
-        msg(M_WARN, "wolfSSL backend does not support setting a maximum TLS version");
+    switch ((ssl_flags >> SSLF_TLS_VERSION_MAX_SHIFT) & SSLF_TLS_VERSION_MAX_MASK) {
+    case TLS_VER_1_0:
+        wolfSSL_CTX_set_options(ctx->ctx, SSL_OP_NO_TLSv1_1);
+        /* no break */
+    case TLS_VER_1_1:
+        wolfSSL_CTX_set_options(ctx->ctx, SSL_OP_NO_TLSv1_2);
+        /* no break */
+    case TLS_VER_1_2:
+        wolfSSL_CTX_set_options(ctx->ctx, SSL_OP_NO_TLSv1_3);
+        /* no break */
+    case TLS_VER_1_3:
+    case TLS_VER_UNSPEC:
+        break;
+    default:
+        msg(M_FATAL, "Unidentified maximum TLS version");
     }
 
     wolfSSL_CTX_set_session_cache_mode(ctx->ctx, WOLFSSL_SESS_CACHE_OFF);
@@ -149,7 +175,10 @@ bool tls_ctx_set_options(struct tls_root_ctx *ctx, unsigned int ssl_flags) {
     }
 #endif
 
-    wolfSSL_CTX_set_verify(ctx->ctx, verify_flags, verify_callback);
+    wolfSSL_CTX_set_verify(ctx->ctx, verify_flags, &verify_callback);
+#ifdef ECC_NO_VERIFY
+    wolfSSL_CTX_SetEccVerifyCb(ctx->ctx, &ecc_verify_cb);
+#endif
 
     return true;
 }
@@ -243,7 +272,8 @@ void tls_ctx_load_ecdh_params(struct tls_root_ctx *ctx, const char *curve_name) 
 
 int tls_ctx_load_pkcs12(struct tls_root_ctx *ctx, const char *pkcs12_file,
                         const char *pkcs12_file_inline, bool load_ca_file) {
-    int ret, pkcs12_len, i;
+    int err, i, ret = 1;
+    uint32_t pkcs12_len;
     struct gc_arena gc = gc_new();
     struct buffer buf;
     WC_PKCS12* pkcs12 = wc_PKCS12_new();
@@ -263,14 +293,17 @@ int tls_ctx_load_pkcs12(struct tls_root_ctx *ctx, const char *pkcs12_file,
             msg(M_FATAL, "Empty pkcs12 parameters passed.");
         }
 
+        /* DER length will be less than PEM length */
         buf = alloc_buf_gc(pkcs12_len, &gc);
         if (!buf_valid(&buf)) {
             msg(M_FATAL, "Error allocating %d bytes for pkcs12 buffer", pkcs12_len);
         }
 
-        if (!buf_write(&buf, pkcs12_file_inline, pkcs12_len)) {
-            msg(M_FATAL, "Error copying pkcs12 parameters.");
+        if ((err = Base64_Decode((uint8_t*) pkcs12_file_inline, pkcs12_len,
+                                 BPTR(&buf), &pkcs12_len)) != 0) {
+            msg(M_FATAL, "Base64_Decode failed with Errno: %d", err);
         }
+        buf.len = pkcs12_len;
     } else {
         /* PKCS12 in file */
         buf = buffer_read_from_file(pkcs12_file, &gc);
@@ -279,14 +312,20 @@ int tls_ctx_load_pkcs12(struct tls_root_ctx *ctx, const char *pkcs12_file,
         }
     }
 
-    if ((ret = wc_d2i_PKCS12(BPTR(&buf), BLEN(&buf), pkcs12)) != 0 ) {
-        msg(M_FATAL, "wc_d2i_PKCS12 failed. Errno: %d", ret);
+    if ((err = wc_d2i_PKCS12(BPTR(&buf), BLEN(&buf), pkcs12)) != 0 ) {
+        msg(M_FATAL, "wc_d2i_PKCS12 failed. Errno: %d", err);
     }
 
     if (wolfSSL_PKCS12_parse(pkcs12, "", &pkey, &cert, &ca) != WOLFSSL_SUCCESS) {
         pem_password_callback(password, sizeof(password) - 1, 0, NULL);
         if (wolfSSL_PKCS12_parse(pkcs12, password, &pkey, &cert, &ca) != WOLFSSL_SUCCESS) {
-            msg(M_FATAL, "wolfSSL_PKCS12_parse failed.");
+            msg(M_INFO, "wolfSSL_PKCS12_parse failed. wolfSSL only supports PKCS "
+                        "data encrypted using SHA1 with 128 bit RC4 and SHA1 with "
+                        "DES3-CBC. Please check that the certificate is using these "
+                        "encryption algorithms. When compiling a certificate with "
+                        "OpenSSL use the -descert option to use the appropriate "
+                        "algorithm.");
+            goto cleanup;
         }
     }
 
@@ -300,9 +339,9 @@ int tls_ctx_load_pkcs12(struct tls_root_ctx *ctx, const char *pkcs12_file,
         if (!(cert_der = wolfSSL_X509_get_der(cert, &cert_der_len))) {
             msg(M_FATAL, "wolfSSL_X509_get_der failed.");
         }
-        if ((ret = wolfSSL_CTX_use_certificate_buffer(ctx->ctx, cert_der, cert_der_len,
+        if ((err = wolfSSL_CTX_use_certificate_buffer(ctx->ctx, cert_der, cert_der_len,
                                                       WOLFSSL_FILETYPE_ASN1)) != SSL_SUCCESS) {
-            msg(M_FATAL, "wolfSSL_CTX_use_certificate_buffer failed. Errno: %d", ret);
+            msg(M_FATAL, "wolfSSL_CTX_use_certificate_buffer failed. Errno: %d", err);
         }
     }
 
@@ -315,6 +354,9 @@ int tls_ctx_load_pkcs12(struct tls_root_ctx *ctx, const char *pkcs12_file,
         }
     }
 
+    ret = 0;
+
+cleanup:
     if (pkey) {
         wolfSSL_EVP_PKEY_free(pkey);
     }
@@ -329,19 +371,14 @@ int tls_ctx_load_pkcs12(struct tls_root_ctx *ctx, const char *pkcs12_file,
     }
     gc_free(&gc);
 
-    return 0;
+    return ret;
 }
 
 #ifdef ENABLE_CRYPTOAPI
 void
 tls_ctx_load_cryptoapi(struct tls_root_ctx *ctx, const char *cryptoapi_cert)
 {
-    ASSERT(NULL != ctx);
-
-    /* Load Certificate and Private Key */
-    if (!SSL_CTX_use_CryptoAPI_certificate(ctx->ctx, cryptoapi_cert)) {
-        crypto_msg(M_FATAL, "Cannot load certificate \"%s\" from Microsoft Certificate Store", cryptoapi_cert);
-    }
+    msg(M_FATAL, "Windows CryptoAPI is not yet supported for wolfSSL.");
 }
 #endif /* ENABLE_CRYPTOAPI */
 
@@ -820,19 +857,55 @@ cleanup:
 }
 
 void print_details(struct key_state_ssl *ks_ssl, const char *prefix) {
-    WOLFSSL_X509 *cert;
+    WOLFSSL_X509 *cert = NULL;
+    const WOLFSSL_CIPHER *ciph;
+    WOLFSSL_EVP_PKEY *key = NULL;
+    char s1[256];
+    char s2[256];
+    char desc[256];
+    const WOLFSSL_EC_GROUP* group;
 
-    cert = wolfSSL_get_peer_certificate(ks_ssl->ssl);
-    if (cert != NULL) {
-        /*
-         * Print straight to stdout
-         */
-        WOLFSSL_BIO* bio;
-        bio = wolfSSL_BIO_new(wolfSSL_BIO_s_file());
-        if (wolfSSL_BIO_set_fp(bio, stdout, BIO_NOCLOSE) == WOLFSSL_SUCCESS) {
-            wolfSSL_X509_print(bio, cert);
+
+    openvpn_snprintf(s2, sizeof(s2), "%s %s", prefix, wolfSSL_get_version(ks_ssl->ssl));
+
+    ciph = wolfSSL_get_current_cipher(ks_ssl->ssl);
+    if (wolfSSL_CIPHER_description(ciph, desc, 256)) {
+        openvpn_snprintf(s1, sizeof(s1), "%s, cipher %s", s2, desc);
+    }
+
+
+    if ((cert = wolfSSL_get_peer_certificate(ks_ssl->ssl)) &&
+            (key = wolfSSL_X509_get_pubkey(cert))) {
+        memcpy(s2, s1, sizeof(s1));
+
+        switch (wolfSSL_X509_get_pubkey_type(cert)) {
+        case RSAk:
+            openvpn_snprintf(s1, sizeof(s1), "%s, %d bit RSA", s2, wolfSSL_EVP_PKEY_bits(key));
+            break;
+        default:
+            /*
+             * wolfSSL only supports RSA and ECC certificate public keys so if it isn't RSA then
+             * it must be ECC.
+             */
+            if ((group = wolfSSL_EC_KEY_get0_group(key->ecc)) &&
+                    (wc_ecc_is_valid_idx(group->curve_idx))) {
+                openvpn_snprintf(s1, sizeof(s1), "%s, %d bit EC, curve: %s", s2,
+                                 wolfSSL_EVP_PKEY_bits(key), ecc_sets[group->curve_idx].name);
+            } else {
+                openvpn_snprintf(s1, sizeof(s1), "%s, %d bit EC, curve: Error getting curve name",
+                                 s2, wolfSSL_EVP_PKEY_bits(key));
+            }
+            break;
         }
-        BIO_free(bio);
+    }
+
+    msg(D_HANDSHAKE, "%s", s1);
+
+    if (key) {
+        wolfSSL_EVP_PKEY_free(key);
+    }
+    if (cert) {
+        wolfSSL_X509_free(cert);
     }
 }
 
