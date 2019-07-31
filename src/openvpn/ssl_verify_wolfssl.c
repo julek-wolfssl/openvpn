@@ -94,6 +94,21 @@ struct buffer x509_get_sha256_fingerprint(openvpn_x509_cert_t *cert, struct gc_a
     return hash;
 }
 
+#ifdef ENABLE_X509ALTUSERNAME
+static enum Extensions_Sum x509_username_field_ext_get_nid(const char *extname) {
+    if (!strcmp(extname, "subjectAltName")) {
+        return ALT_NAMES_OID;
+    } else if (!strcmp(extname, "issuerAltName")) {
+        return ISSUE_ALT_NAMES_OID;
+    } else {
+        return 0;
+    }
+}
+bool x509_username_field_ext_supported(const char *extname) {
+    return x509_username_field_ext_get_nid(extname) != 0;
+}
+#endif
+
 result_t backend_x509_get_username(char *common_name, int cn_len,
                                    char *x509_username_field, openvpn_x509_cert_t *peer_cert) {
     result_t res = FAILURE;
@@ -101,22 +116,36 @@ result_t backend_x509_get_username(char *common_name, int cn_len,
     char *subject = NULL;
 #ifdef ENABLE_X509ALTUSERNAME
     WOLFSSL_STACK *ext = NULL;
+    bool found = false;
     if (strncmp("ext:",x509_username_field,4) == 0) {
         int i;
         int nid;
         char szOid[1024];
 
-        nid = wolfSSL_OBJ_txt2nid(x509_username_field + 4);
-        ext = wolfSSL_X509_get_ext_d2i(peer_cert, nid, NULL, NULL);
-        if (ext) {
-            for (i = 0; i < wolfSSL_sk_GENERAL_NAME_num(ext); i++) {
-                WOLFSSL_ASN1_OBJECT *name = wolfSSL_sk_GENERAL_NAME_value(ext, i);
-                if (wolfSSL_OBJ_obj2txt(szOid, sizeof(szOid), name, 0) > 0) {
-                    strncpy(common_name, szOid, cn_len);
-                    break;
-                }
+        if (!(nid = x509_username_field_ext_get_nid(x509_username_field + 4))) {
+            msg(D_TLS_ERRORS, "ERROR: --x509-username-field 'ext:%s' not supported",
+                    x509_username_field + 4);
+            goto failure;
+        }
+
+        if (!(ext = wolfSSL_X509_get_ext_d2i(peer_cert, nid, NULL, NULL))) {
+            goto failure;
+        }
+
+        for (i = 0; i < wolfSSL_sk_GENERAL_NAME_num(ext); i++) {
+            WOLFSSL_ASN1_OBJECT *name = wolfSSL_sk_GENERAL_NAME_value(ext, i);
+            if (wolfSSL_OBJ_obj2txt(szOid, sizeof(szOid), name, 0) > 0) {
+                strncpy(common_name, szOid, cn_len);
+                found = true;
+                break;
+            } else if (name->obj) {
+                strncpy(common_name, (char*) name->obj, cn_len);
+                found = true;
+                break;
             }
-        } else {
+        }
+
+        if (!found) {
             goto failure;
         }
     } else
@@ -157,16 +186,6 @@ failure:
 #endif
     return res;
 }
-
-#ifdef ENABLE_X509ALTUSERNAME
-bool x509_username_field_ext_supported(const char *extname) {
-    if (!strcmp(extname, "subjectAltName") || !strcmp(extname, "issuerAltName")) {
-        return true;
-    } else {
-        return false;
-    }
-}
-#endif
 
 
 char *backend_x509_get_serial(openvpn_x509_cert_t *cert, struct gc_arena *gc) {

@@ -507,6 +507,26 @@ void tls_ctx_load_extra_certs(struct tls_root_ctx *ctx, const char *extra_certs_
     tls_ctx_load_ca(ctx, extra_certs_file, extra_certs_file_inline, NULL, false);
 }
 
+void backend_tls_ctx_reload_crl(struct tls_root_ctx *ssl_ctx,
+                                const char *crl_file, const char *crl_inline) {
+    int ret, len;
+    if (!strcmp(crl_file, INLINE_FILE_TAG) && crl_inline) {
+        /* CRL in memory */
+        if ((len = strlen(crl_inline)) == 0) {
+            msg(M_FATAL, "Empty CRL passed.");
+        }
+        if ((ret = wolfSSL_CTX_LoadCRLBuffer(ssl_ctx->ctx, (unsigned char*)crl_inline,
+                                             len, SSL_FILETYPE_PEM)) != SSL_SUCCESS) {
+            msg(M_FATAL, "wolfSSL_CTX_LoadCRLBuffer failed with Errno: %d", ret);
+        }
+    } else {
+        /* CRL in file */
+        if ((ret = wolfSSL_CTX_LoadCRL(ssl_ctx->ctx, crl_file, SSL_FILETYPE_PEM, 0)) != SSL_SUCCESS) {
+            msg(M_FATAL, "wolfSSL_CTX_LoadCRL failed with Errno: %d", ret);
+        }
+    }
+}
+
 /* **************************************
  *
  * Key-state specific functions
@@ -698,26 +718,6 @@ void key_state_ssl_free(struct key_state_ssl *ks_ssl) {
     ks_ssl->recv_buf = NULL;
     ks_ssl->send_buf = NULL;
     ks_ssl->session = NULL;
-}
-
-void backend_tls_ctx_reload_crl(struct tls_root_ctx *ssl_ctx,
-                                const char *crl_file, const char *crl_inline) {
-    int ret, len;
-    if (!strcmp(crl_file, INLINE_FILE_TAG) && crl_inline) {
-        /* CRL in memory */
-        if ((len = strlen(crl_inline)) == 0) {
-            msg(M_FATAL, "Empty CRL passed.");
-        }
-        if ((ret = wolfSSL_CTX_LoadCRLBuffer(ssl_ctx->ctx, (unsigned char*)crl_inline,
-                                             len, SSL_FILETYPE_PEM)) != SSL_SUCCESS) {
-            msg(M_FATAL, "wolfSSL_CTX_LoadCRLBuffer failed with Errno: %d", ret);
-        }
-    } else {
-        /* CRL in file */
-        if ((ret = wolfSSL_CTX_LoadCRL(ssl_ctx->ctx, crl_file, SSL_FILETYPE_PEM, 0)) != SSL_SUCCESS) {
-            msg(M_FATAL, "wolfSSL_CTX_LoadCRL failed with Errno: %d", ret);
-        }
-    }
 }
 
 void key_state_export_keying_material(struct key_state_ssl *ks_ssl,
