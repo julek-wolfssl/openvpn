@@ -121,6 +121,7 @@ result_t backend_x509_get_username(char *common_name, int cn_len,
         int i;
         int nid;
         char szOid[1024];
+        WOLFSSL_ASN1_OBJECT *name;
 
         if (!(nid = x509_username_field_ext_get_nid(x509_username_field + 4))) {
             msg(D_TLS_ERRORS, "ERROR: --x509-username-field 'ext:%s' not supported",
@@ -133,15 +134,17 @@ result_t backend_x509_get_username(char *common_name, int cn_len,
         }
 
         for (i = 0; i < wolfSSL_sk_GENERAL_NAME_num(ext); i++) {
-            WOLFSSL_ASN1_OBJECT *name = wolfSSL_sk_GENERAL_NAME_value(ext, i);
-            if (wolfSSL_OBJ_obj2txt(szOid, sizeof(szOid), name, 0) > 0) {
-                strncpy(common_name, szOid, cn_len);
-                found = true;
-                break;
-            } else if (name->obj) {
-                strncpy(common_name, (char*) name->obj, cn_len);
-                found = true;
-                break;
+            name = wolfSSL_sk_GENERAL_NAME_value(ext, i);
+            if (name->type == ASN_RFC822_TYPE) { /* Check if email type */
+                if (wolfSSL_OBJ_obj2txt(szOid, sizeof(szOid), name, 0) > 0) {
+                    strncpy(common_name, szOid, cn_len);
+                    found = true;
+                    break;
+                } else if (name->obj) {
+                    strncpy(common_name, (char*) name->obj, cn_len);
+                    found = true;
+                    break;
+                }
             }
         }
 
