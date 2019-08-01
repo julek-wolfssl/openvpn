@@ -118,6 +118,19 @@ static int ecc_verify_cb(WOLFSSL* ssl,
 }
 #endif
 
+static void info_callback(const WOLFSSL* ssl, int type, int val) {
+    if (type & SSL_CB_LOOP) {
+        dmsg(D_HANDSHAKE_VERBOSE, "SSL state (%s): %s",
+                type & SSL_ST_CONNECT ? "connect" :
+                type & SSL_ST_ACCEPT ? "accept" :
+                "undefined", wolfSSL_state_string_long(ssl));
+    } else if (type & SSL_CB_ALERT) {
+        dmsg(D_HANDSHAKE_VERBOSE, "SSL alert (%s): %s",
+                type & SSL_CB_READ ? "read" : "write",
+                wolfSSL_alert_type_string_long(val));
+    }
+}
+
 bool tls_ctx_set_options(struct tls_root_ctx *ctx, unsigned int ssl_flags) {
     int ret = SSL_SUCCESS;
     int verify_flags = WOLFSSL_VERIFY_PEER | WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT;
@@ -165,6 +178,7 @@ bool tls_ctx_set_options(struct tls_root_ctx *ctx, unsigned int ssl_flags) {
 
     wolfSSL_CTX_set_session_cache_mode(ctx->ctx, WOLFSSL_SESS_CACHE_OFF);
     wolfSSL_CTX_set_default_passwd_cb(ctx->ctx, pem_password_callback);
+    wolfSSL_CTX_set_info_callback(ctx->ctx, info_callback);
 
     /* Require peer certificate verification */
 #if P2MP_SERVER
@@ -544,33 +558,55 @@ static int ssl_buff_read(WOLFSSL *ssl, char *buf, int sz, void *ctx) {
     struct bucket_t* b;
     uint32_t l, ret = 0, len = sz;
 
-    if (!ssl_buf->first) {
+    if (!ssl_buf->first || !ssl_buf->len) {
         return WOLFSSL_CBIO_ERR_WANT_READ;
     }
 
-    while (len && ssl_buf->first) {
+    while (len && ssl_buf->len) {
         l = MIN(len, ssl_buf->first->len);
         memcpy(buf, ssl_buf->first->buf + ssl_buf->first->offset, l);
         ssl_buf->first->offset += l;
         ssl_buf->first->len -= l;
+        ssl_buf->len -= l;
         len -= l;
         buf += l;
         ret += l;
-        ssl_buf->len -= l;
-        if (ssl_buf->first->len == 0) {
+        if (!ssl_buf->first->len) {
             /* Bucket is wholly read */
-            b = ssl_buf->first;
-            ssl_buf->first = ssl_buf->first->next;
-            free(b);
+            if (ssl_buf->first != ssl_buf->last) {
+                /* Free bucket and go to next one */
+                b = ssl_buf->first;
+                ssl_buf->first = ssl_buf->first->next;
+                free(b);
+            } else {
+                /*
+                 * Reset and keep one bucket so that we don't have to
+                 * malloc buckets for many small messages.
+                 */
+                ssl_buf->first->len = 0;
+                ssl_buf->first->offset = 0;
+            }
         }
     }
 
-    if (!ssl_buf->first) {
-        /* All buckets have been freed */
-        ssl_buf->last = NULL;
-    }
-
     return ret;
+}
+
+static void allocate_new_bucket(struct bucket_t** last, struct bucket_t** second_last,
+                                uint32_t* len, char** buf) {
+    uint32_t l;
+
+    *last = *second_last = (struct bucket_t*) malloc(sizeof(struct bucket_t));
+    check_malloc_return(*last);
+
+    l = MIN(*len, BUCKET_BUF_LEN);
+    (*last)->len = l;
+    (*last)->offset = 0;
+    (*last)->next = NULL;
+    memcpy((*last)->buf, *buf, l);
+
+    *len -= l;
+    *buf += l;
 }
 
 static int ssl_buff_write(WOLFSSL *ssl, char *buf, int sz, void *ctx) {
@@ -584,25 +620,13 @@ static int ssl_buff_write(WOLFSSL *ssl, char *buf, int sz, void *ctx) {
     ssl_buf->len += len;
 
     if (!ssl_buf->first) {
-        ssl_buf->first = ssl_buf->last = (struct bucket_t*) malloc(sizeof(struct bucket_t));
-        check_malloc_return(ssl_buf->first);
+        /* First time ssl_buff_write so we need to allocate the first bucket. */
 
-        l = MIN(len, BUCKET_BUF_LEN);
-        ssl_buf->first->len = l;
-        ssl_buf->first->offset = 0;
-        ssl_buf->first->next = NULL;
-        memcpy(ssl_buf->first->buf, buf, l);
-
-        if (len <= BUCKET_BUF_LEN) {
-            return sz;
-        }
-
-        len -= l;
-        buf += l;
+        allocate_new_bucket(&ssl_buf->last, &ssl_buf->first, &len, &buf);
     }
 
     while (len) {
-        l = MIN(len, BUCKET_BUF_LEN - ssl_buf->last->len - ssl_buf->last->offset);
+        l = MIN(len, BUCKET_BUF_LEN - (ssl_buf->last->offset + ssl_buf->last->len));
         if (l) {
             /* If there is any room in the last bucket then copy */
             memcpy(ssl_buf->last->buf + ssl_buf->last->offset + ssl_buf->last->len, buf, l);
@@ -616,17 +640,7 @@ static int ssl_buff_write(WOLFSSL *ssl, char *buf, int sz, void *ctx) {
             break;
         }
 
-        ssl_buf->last = ssl_buf->last->next = (struct bucket_t*) malloc(sizeof(struct bucket_t));
-        check_malloc_return(ssl_buf->last);
-
-        l = MIN(len, BUCKET_BUF_LEN);
-        ssl_buf->last->len = l;
-        ssl_buf->last->offset = 0;
-        ssl_buf->last->next = NULL;
-        memcpy(ssl_buf->last->buf, buf, l);
-
-        len -= l;
-        buf += l;
+        allocate_new_bucket(&ssl_buf->last, &ssl_buf->last->next, &len, &buf);
     }
 
     return sz;

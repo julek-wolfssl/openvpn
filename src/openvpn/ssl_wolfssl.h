@@ -42,6 +42,7 @@
 #define TLS1_2_VERSION                  0x0303
 #define TLS1_3_VERSION                  0x0304
 
+/* The list_buffer_t structure malloc's increments of BUCKET_BUF_LEN buckets */
 #define BUCKET_BUF_LEN (1024*5)
 
 /*
