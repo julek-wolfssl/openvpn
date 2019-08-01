@@ -162,10 +162,10 @@ result_t backend_x509_get_username(char *common_name, int cn_len,
         subject = wolfSSL_X509_NAME_oneline(name, NULL, 0);
 
         for (c = subject; *c != '\0'; c++) {
-            if (*c == '/' && strncmp(++c, x509_username_field, field_len) == 0) {
-                c += field_len; // increment to value of field
+            if (*c == '/' && strncmp(c+1, x509_username_field, field_len) == 0) {
+                c += field_len + 1; // increment to value of field
                 start_pos = c + 1;
-                while (*(++c) != '/' && *c != '\0'); // inc to next slash
+                while (*(++c) != '/' && *c != '\0'); // inc to next slash or end of string
                 value_len = MIN(c-start_pos, cn_len-1);
                 memcpy(common_name, start_pos, value_len);
                 common_name[value_len] = '\0';
