@@ -104,20 +104,6 @@ bool tls_ctx_initialised(struct tls_root_ctx *ctx) {
     return NULL != ctx->ctx;
 }
 
-#define ECC_NO_VERIFY
-
-#ifdef ECC_NO_VERIFY
-static int ecc_verify_cb(WOLFSSL* ssl,
-       const unsigned char* sig, unsigned int sigSz,
-       const unsigned char* hash, unsigned int hashSz,
-       const unsigned char* keyDer, unsigned int keySz,
-       int* result, void* ctx) {
-    /* TODO Figure out a way to properly verify an ECC hash */
-    *result = 1;
-    return 0;
-}
-#endif
-
 static void info_callback(const WOLFSSL* ssl, int type, int val) {
     if (type & SSL_CB_LOOP) {
         dmsg(D_HANDSHAKE_VERBOSE, "SSL state (%s): %s",
@@ -190,9 +176,6 @@ bool tls_ctx_set_options(struct tls_root_ctx *ctx, unsigned int ssl_flags) {
 #endif
 
     wolfSSL_CTX_set_verify(ctx->ctx, verify_flags, &verify_callback);
-#ifdef ECC_NO_VERIFY
-    wolfSSL_CTX_SetEccVerifyCb(ctx->ctx, &ecc_verify_cb);
-#endif
 
     return true;
 }
