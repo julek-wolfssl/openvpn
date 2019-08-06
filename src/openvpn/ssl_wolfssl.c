@@ -887,7 +887,8 @@ void print_details(struct key_state_ssl *ks_ssl, const char *prefix) {
             if ((group = wolfSSL_EC_KEY_get0_group(key->ecc)) &&
                     (wc_ecc_is_valid_idx(group->curve_idx))) {
                 openvpn_snprintf(s1, sizeof(s1), "%s, %d bit EC, curve: %s", s2,
-                                 wolfSSL_EVP_PKEY_bits(key), ecc_sets[group->curve_idx].name);
+                                 wolfSSL_EVP_PKEY_bits(key),
+                                 wc_ecc_get_name(wc_ecc_get_curve_id(group->curve_idx)));
             } else {
                 openvpn_snprintf(s1, sizeof(s1), "%s, %d bit EC, curve: Error getting curve name",
                                  s2, wolfSSL_EVP_PKEY_bits(key));
@@ -951,8 +952,8 @@ void show_available_curves(void) {
 #ifdef HAVE_ECC
     int i;
     printf("Available Elliptic curves:\n");
-    for (i=0; ecc_sets[i].id != ECC_CURVE_INVALID; i++) {
-        printf("%s\n", ecc_sets[i].name);
+    for (i=0; wc_ecc_is_valid_idx(i); i++) {
+        printf("%s\n", wc_ecc_get_name(wc_ecc_get_curve_id(i)));
     }
 #else
     msg(M_FATAL, "wolfSSL library compiled without ECC support.");
