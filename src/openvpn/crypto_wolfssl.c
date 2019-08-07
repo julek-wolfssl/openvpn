@@ -984,11 +984,10 @@ static int wolfssl_ctx_init(cipher_ctx_t *ctx, const uint8_t *key, int key_len, 
         if (key) {
             if ((ret = wc_AesGcmSetKey(&ctx->cipher.aes, key, key_len)) != 0) {
                 msg(M_FATAL, "wc_AesGcmSetKey failed with Errno: %d", ret);
-                return 0;
             }
         }
         if (iv) {
-            memcpy(&ctx->iv, iv, AES_BLOCK_SIZE);
+            memcpy(ctx->iv.aes, iv, AES_BLOCK_SIZE);
         }
         break;
 #endif
@@ -1053,7 +1052,14 @@ static int wolfssl_ctx_init(cipher_ctx_t *ctx, const uint8_t *key, int key_len, 
         break;
     }
     ctx->buf_used = 0;
-    reset_aead(ctx);
+#ifdef HAVE_AEAD_CIPHER_MODES
+    ctx->aead_updated = false;
+    if (ctx->aead_buf) {
+        free(ctx->aead_buf);
+        ctx->aead_buf = NULL;
+        ctx->aead_buf_len = 0;
+    }
+#endif
     return 1;
 }
 
@@ -1133,6 +1139,7 @@ int cipher_ctx_update_ad(cipher_ctx_t *ctx, const uint8_t *src, int src_len) {
     ctx->authIn = (uint8_t*) realloc(ctx->authIn, src_len);
     check_malloc_return(ctx->authIn);
     memcpy(ctx->authIn, src, src_len);
+    ctx->authInSz = src_len;
 #else
     msg(M_FATAL, "%s called without AEAD functionality compiiled in.", __func__);
 #endif
