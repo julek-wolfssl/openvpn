@@ -78,6 +78,10 @@
 /** Cipher should decrypt */
 #define OPENVPN_OP_DECRYPT      0
 
+#ifdef HAVE_AESGCM
+#define AESGCM_IV_SZ GCM_NONCE_MID_SZ
+#endif
+
 /** Generic cipher key type %context. */
 typedef enum {
     /* DO NOT CHANGE ORDER OF ELEMENTS */

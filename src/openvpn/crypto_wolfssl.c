@@ -624,20 +624,21 @@ int cipher_kt_iv_size(const cipher_kt_t *cipher_kt) {
     case OV_WC_AES_192_CFB_TYPE:
     case OV_WC_AES_256_CFB_TYPE:
 #endif
+#if defined(HAVE_AES_CBC) || defined(WOLFSSL_AES_COUNTER) || defined(HAVE_AES_ECB) || defined(WOLFSSL_AES_DIRECT) || defined(WOLFSSL_AES_CFB)
+        return AES_IV_SIZE;
+#endif
 #ifdef HAVE_AESGCM
     case OV_WC_AES_128_GCM_TYPE:
     case OV_WC_AES_192_GCM_TYPE:
     case OV_WC_AES_256_GCM_TYPE:
-#endif
-#if defined(HAVE_AES_CBC) || defined(WOLFSSL_AES_COUNTER) || defined(HAVE_AES_ECB) || defined(WOLFSSL_AES_DIRECT) || defined(WOLFSSL_AES_CFB) || defined(HAVE_AESGCM)
-        return AES_BLOCK_SIZE;
+        return AESGCM_IV_SZ;
 #endif
 #ifndef NO_DES3
     case OV_WC_DES_CBC_TYPE:
     case OV_WC_DES_ECB_TYPE:
     case OV_WC_DES_EDE3_CBC_TYPE:
     case OV_WC_DES_EDE3_ECB_TYPE:
-        return DES_BLOCK_SIZE;
+        return DES_IV_SIZE;
 #endif
 #if defined(HAVE_CHACHA) && defined(HAVE_POLY1305)
     case OV_WC_CHACHA20_POLY1305_TYPE:
@@ -918,7 +919,6 @@ static int wolfssl_ctx_init(cipher_ctx_t *ctx, const uint8_t *key, int key_len, 
     int ret;
 
     switch (*kt) {
-    /* SETUP AES */
 #ifdef HAVE_AES_CBC
     case OV_WC_AES_128_CBC_TYPE:
     case OV_WC_AES_192_CBC_TYPE:
@@ -987,7 +987,7 @@ static int wolfssl_ctx_init(cipher_ctx_t *ctx, const uint8_t *key, int key_len, 
             }
         }
         if (iv) {
-            memcpy(ctx->iv.aes, iv, AES_BLOCK_SIZE);
+            memcpy(ctx->iv.aes, iv, AESGCM_IV_SZ);
         }
         break;
 #endif
@@ -1098,11 +1098,11 @@ int cipher_ctx_get_tag(cipher_ctx_t *ctx, uint8_t *tag, int tag_len) {
     if (!ctx || !tag) {
         return 0;
     }
-    ASSERT(tag_len >= OPENVPN_AEAD_TAG_LENGTH);
+    ASSERT(tag_len == OPENVPN_AEAD_TAG_LENGTH);
     memcpy(tag, ctx->aead_tag, OPENVPN_AEAD_TAG_LENGTH);
     return 1;
 #else
-    msg(M_FATAL, "%s called without AEAD functionality compiiled in.", __func__);
+    msg(M_FATAL, "%s called without AEAD functionality compiled in.", __func__);
 #endif
 }
 
@@ -1136,7 +1136,10 @@ int cipher_ctx_update_ad(cipher_ctx_t *ctx, const uint8_t *src, int src_len) {
     if (!ctx || !src || src_len <= 0) {
         msg(M_FATAL, "Invalid parameter(s) for cipher_ctx_update_ad");
     }
-    ctx->authIn = (uint8_t*) realloc(ctx->authIn, src_len);
+    if (ctx->authIn) {
+        free(ctx->authIn);
+    }
+    ctx->authIn = (uint8_t*) malloc(src_len);
     check_malloc_return(ctx->authIn);
     memcpy(ctx->authIn, src, src_len);
     ctx->authInSz = src_len;
@@ -1242,15 +1245,13 @@ static int wolfssl_ctx_update_blocks(cipher_ctx_t *ctx, uint8_t *dst, int *dst_l
     case OV_WC_AES_256_GCM_TYPE:
         if (ctx->aead_updated) {
             msg(M_FATAL, "AEAD ALGORITHMS MAY ONLY CALL UPDATE ONCE");
-            return 0;
         }
         if (ctx->enc == OV_WC_ENCRYPT) {
             if ((ret = wc_AesGcmEncrypt(&ctx->cipher.aes, dst, src, src_len,
-                                        ctx->iv.aes, AES_BLOCK_SIZE, ctx->aead_tag,
+                                        ctx->iv.aes, AESGCM_IV_SZ, ctx->aead_tag,
                                         OPENVPN_AEAD_TAG_LENGTH, ctx->authIn,
                                         ctx->authInSz)) != 0) {
                 msg(M_FATAL, "wc_AesGcmEncrypt failed with Errno: %d", ret);
-                return 0;
             }
         } else {
             /*
@@ -1532,7 +1533,7 @@ int cipher_ctx_final_check_tag(cipher_ctx_t *ctx, uint8_t *dst, int *dst_len,
     case OV_WC_AES_192_GCM_TYPE:
     case OV_WC_AES_256_GCM_TYPE:
         if ((ret = wc_AesGcmDecrypt(&ctx->cipher.aes, dst, ctx->aead_buf, ctx->aead_buf_len,
-                                    ctx->iv.aes, AES_BLOCK_SIZE, tag, tag_len, ctx->authIn,
+                                    ctx->iv.aes, AESGCM_IV_SZ, tag, tag_len, ctx->authIn,
                                     ctx->authInSz)) != 0) {
             msg(M_FATAL, "wc_AesGcmDecrypt failed with Errno: %d", ret);
             return 0;
