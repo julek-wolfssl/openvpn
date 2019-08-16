@@ -49,7 +49,8 @@
  * The len and offset members refer to the length and offset within a bucket.
  * Each bucket can hold up to BUCKET_BUF_LEN data.
  */
-struct bucket_t {
+struct bucket_t
+{
     uint32_t len;
     uint32_t offset;
     struct bucket_t* next;
@@ -63,7 +64,8 @@ struct bucket_t {
  * The granularity of BUCKET_BUF_LEN avoids malloc'ing too much memory or calling
  * malloc too often.
  */
-struct list_buffer_t {
+struct list_buffer_t
+{
     uint32_t len;
     struct bucket_t* first;
     struct bucket_t* last;
@@ -73,13 +75,15 @@ struct list_buffer_t {
  * Structure that wraps the TLS context. Contents differ depending on the
  * SSL library used.
  */
-struct tls_root_ctx {
-	WOLFSSL_CTX *ctx;
+struct tls_root_ctx
+{
+    WOLFSSL_CTX *ctx;
     time_t crl_last_mtime;
     off_t crl_last_size;
 };
 
-struct key_state_ssl {
+struct key_state_ssl
+{
     WOLFSSL *ssl;
     struct list_buffer_t *send_buf;
     struct list_buffer_t *recv_buf;
