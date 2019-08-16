@@ -72,8 +72,6 @@ crypto_pem_encode_decode_loopback(void **state) {
     assert_int_equal(BLEN(&src_buf), BLEN(&dec_buf));
     assert_memory_equal(BPTR(&src_buf), BPTR(&dec_buf), BLEN(&src_buf));
 
-    printf("%s\n", BPTR(&pem_buf));
-
     gc_free(&gc);
 }
 
