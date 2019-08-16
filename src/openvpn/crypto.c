@@ -1465,8 +1465,13 @@ write_key_file(const int nkeys, const char *filename)
 
     buf_printf(&out, "%s\n", static_key_foot);
 
+    /* write key file to stdout if no filename given */
+    if (!filename || strcmp(filename, "")==0)
+    {
+        printf("%s\n", BPTR(&out));
+    }
     /* write key file, now formatted in out, to file */
-    if (!buffer_write_file(filename, &out))
+    else if (!buffer_write_file(filename, &out))
     {
         nbits = -1;
     }
@@ -1488,7 +1493,7 @@ must_have_n_keys(const char *filename, const char *option, const struct key2 *ke
 #ifdef ENABLE_SMALL
         msg(M_FATAL, "Key file '%s' used in --%s contains insufficient key material [keys found=%d required=%d]", filename, option, key2->n, n);
 #else
-        msg(M_FATAL, "Key file '%s' used in --%s contains insufficient key material [keys found=%d required=%d] -- try generating a new key file with '" PACKAGE " --genkey --secret [file]', or use the existing key file in bidirectional mode by specifying --%s without a key direction parameter", filename, option, key2->n, n, option);
+        msg(M_FATAL, "Key file '%s' used in --%s contains insufficient key material [keys found=%d required=%d] -- try generating a new key file with '" PACKAGE " --genkey secret [file]', or use the existing key file in bidirectional mode by specifying --%s without a key direction parameter", filename, option, key2->n, n, option);
 #endif
     }
 }
@@ -1870,7 +1875,11 @@ write_pem_key_file(const char *filename, const char *pem_name)
         goto cleanup;
     }
 
-    if (!buffer_write_file(filename, &server_key_pem))
+    if (!filename || strcmp(filename, "")==0)
+    {
+        printf("%s\n", BPTR(&server_key_pem));
+    }
+    else if (!buffer_write_file(filename, &server_key_pem))
     {
         msg(M_ERR, "ERROR: could not write key file");
         goto cleanup;
@@ -1881,6 +1890,24 @@ cleanup:
     buf_clear(&server_key_pem);
     gc_free(&gc);
     return;
+}
+
+bool
+generate_ephemeral_key(struct buffer *key, const char *key_name)
+{
+    const int len = BCAP(key);
+
+    msg(M_INFO, "Using random %s.", key_name);
+
+    if (!rand_bytes(BEND(key), len))
+    {
+        msg(M_WARN, "ERROR: could not generate random key");
+        return false;
+    }
+
+    buf_inc_len(key, len);
+
+    return true;
 }
 
 bool
