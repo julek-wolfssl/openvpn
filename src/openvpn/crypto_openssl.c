@@ -43,12 +43,12 @@
 #include "crypto_backend.h"
 #include "openssl_compat.h"
 
-#include <openssl/des.h>
-#include <openssl/err.h>
-#include <openssl/evp.h>
-#include <openssl/objects.h>
-#include <openssl/rand.h>
-#include <openssl/ssl.h>
+#include <wolfssl/openssl/des.h>
+#include <wolfssl/openssl/err.h>
+#include <wolfssl/openssl/evp.h>
+#include <wolfssl/openssl/objects.h>
+#include <wolfssl/openssl/rand.h>
+#include <wolfssl/openssl/ssl.h>
 
 /*
  * Check for key size creepage.
@@ -63,7 +63,7 @@
 #endif
 
 #if HAVE_OPENSSL_ENGINE
-#include <openssl/engine.h>
+#include <wolfssl/openssl/engine.h>
 
 static bool engine_initialized = false; /* GLOBAL */
 

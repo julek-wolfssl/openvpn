@@ -30,7 +30,7 @@
 #ifndef SSL_VERIFY_OPENSSL_H_
 #define SSL_VERIFY_OPENSSL_H_
 
-#include <openssl/x509.h>
+#include <wolfssl/openssl/x509.h>
 
 #ifndef __OPENVPN_X509_CERT_T_DECLARED
 #define __OPENVPN_X509_CERT_T_DECLARED

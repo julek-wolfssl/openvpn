@@ -44,9 +44,9 @@
 #include "ssl_verify_backend.h"
 #include "openssl_compat.h"
 
-#include <openssl/bn.h>
-#include <openssl/err.h>
-#include <openssl/x509v3.h>
+#include <wolfssl/openssl/bn.h>
+#include <wolfssl/openssl/err.h>
+#include <wolfssl/openssl/x509v3.h>
 
 int
 verify_callback(int preverify_ok, X509_STORE_CTX *ctx)

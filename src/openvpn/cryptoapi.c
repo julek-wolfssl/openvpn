@@ -39,6 +39,10 @@
 
 #ifdef ENABLE_CRYPTOAPI
 
+#ifdef ENABLE_CRYPTO_WOLFSSL
+#error wolfSSL does not support CryptoAPI
+#endif
+
 #include <openssl/ssl.h>
 #include <openssl/evp.h>
 #include <openssl/err.h>

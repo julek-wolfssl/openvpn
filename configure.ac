@@ -276,10 +276,10 @@ AC_ARG_WITH(
 
 AC_ARG_WITH(
 	[crypto-library],
-	[AS_HELP_STRING([--with-crypto-library=library], [build with the given crypto library, TYPE=openssl|mbedtls @<:@default=openssl@:>@])],
+ 	[AS_HELP_STRING([--with-crypto-library=library], [build with the given crypto library, TYPE=openssl|mbedtls|wolfssl @<:@default=openssl@:>@])],
 	[
 		case "${withval}" in
-			openssl|mbedtls) ;;
+			openssl|mbedtls|wolfssl) ;;
 			*) AC_MSG_ERROR([bad value ${withval} for --with-crypto-library]) ;;
 		esac
 	],
@@ -1011,6 +1011,74 @@ elif test "${with_crypto_library}" = "mbedtls"; then
 	AC_DEFINE([ENABLE_CRYPTO_MBEDTLS], [1], [Use mbed TLS library])
 	CRYPTO_CFLAGS="${MBEDTLS_CFLAGS}"
 	CRYPTO_LIBS="${MBEDTLS_LIBS}"
+elif test "${with_crypto_library}" = "wolfssl"; then
+	AC_ARG_VAR([WOLFSSL_CFLAGS], [C compiler flags for wolfssl])
+	AC_ARG_VAR([WOLFSSL_LIBS], [linker flags for wolfssl])
+
+	saved_CFLAGS="${CFLAGS}"
+	saved_LIBS="${LIBS}"
+
+	if test -z "${WOLFSSL_CFLAGS}" -a -z "${WOLFSSL_LIBS}"; then
+		# if the user did not explicitly specify flags, try to autodetect
+		LIBS="${LIBS} -lwolfssl -lm -pthread"
+		AC_CHECK_LIB(
+			[wolfssl],
+			[wolfSSL_EVP_MD_CTX_free],
+			[],
+			[AC_MSG_ERROR([Could not link wolfSSL library.])]
+		)
+	fi
+	
+	AC_CHECK_FUNCS(
+		[ \
+			HMAC_CTX_new \
+			HMAC_CTX_free \
+			HMAC_CTX_reset \
+			EVP_MD_CTX_new \
+			wolfSSL_EVP_MD_CTX_free \
+			EVP_MD_CTX_free \
+			EVP_MD_CTX_reset \
+			OpenSSL_version \
+			SSL_CTX_get_default_passwd_cb \
+			SSL_CTX_get_default_passwd_cb_userdata \
+			SSL_CTX_set_security_level \
+			X509_get0_pubkey \
+			X509_STORE_get0_objects \
+			X509_OBJECT_free \
+			X509_OBJECT_get_type \
+			EVP_PKEY_id \
+			EVP_PKEY_get0_RSA \
+			EVP_PKEY_get0_DSA \
+			EVP_PKEY_get0_EC_KEY \
+			RSA_set_flags \
+			RSA_bits \
+			RSA_get0_key \
+			RSA_set0_key \
+			DSA_get0_pqg \
+			DSA_bits \
+			RSA_meth_new \
+			RSA_meth_free \
+			RSA_meth_set_pub_enc \
+			RSA_meth_set_pub_dec \
+			RSA_meth_set_priv_enc \
+			RSA_meth_set_priv_dec \
+			RSA_meth_set_init \
+			RSA_meth_set_sign \
+			RSA_meth_set_finish \
+			RSA_meth_set0_app_data \
+			RSA_meth_get0_app_data \
+			EC_GROUP_order_bits
+		]
+	)
+
+	have_crypto_aead_modes="no"
+
+	CFLAGS="${WOLFSSL_CFLAGS} ${CFLAGS}"
+	LIBS="${WOLFSSL_LIBS} ${LIBS}"
+	AC_DEFINE([ENABLE_CRYPTO_WOLFSSL], [1], [Use wolfSSL crypto library])
+	AC_DEFINE([ENABLE_CRYPTO_OPENSSL], [1], [Use wolfSSL openssl compatibility layer])
+	CRYPTO_CFLAGS="${WOLFSSL_CFLAGS}"
+	CRYPTO_LIBS="${WOLFSSL_LIBS}"
 else
 	AC_MSG_ERROR([Invalid crypto library: ${with_crypto_library}])
 fi

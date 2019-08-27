@@ -52,17 +52,17 @@
 
 #include "ssl_verify_openssl.h"
 
-#include <openssl/bn.h>
-#include <openssl/crypto.h>
-#include <openssl/dh.h>
-#include <openssl/dsa.h>
-#include <openssl/err.h>
-#include <openssl/pkcs12.h>
-#include <openssl/rsa.h>
-#include <openssl/x509.h>
-#include <openssl/ssl.h>
+#include <wolfssl/openssl/bn.h>
+#include <wolfssl/openssl/crypto.h>
+#include <wolfssl/openssl/dh.h>
+#include <wolfssl/openssl/dsa.h>
+#include <wolfssl/openssl/err.h>
+#include <wolfssl/openssl/pkcs12.h>
+#include <wolfssl/openssl/rsa.h>
+#include <wolfssl/openssl/x509.h>
+#include <wolfssl/openssl/ssl.h>
 #ifndef OPENSSL_NO_EC
-#include <openssl/ec.h>
+#include <wolfssl/openssl/ec.h>
 #endif
 
 /*
