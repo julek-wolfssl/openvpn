@@ -29,7 +29,11 @@
 #ifndef SSL_OPENSSL_H_
 #define SSL_OPENSSL_H_
 
+#ifdef ENABLE_CRYPTO_WOLFSSL
 #include <wolfssl/openssl/ssl.h>
+#else
+#include <openssl/ssl.h>
+#endif
 
 /**
  * Structure that wraps the TLS context. Contents differ depending on the

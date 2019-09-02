@@ -42,11 +42,15 @@
 
 #include "buffer.h"
 
-#define OPENSSL_ALL
-#define OPENSSL_EXTRA
+#ifdef ENABLE_CRYPTO_WOLFSSL
 #include <wolfssl/openssl/rsa.h>
 #include <wolfssl/openssl/ssl.h>
 #include <wolfssl/openssl/x509.h>
+#else
+#include <openssl/rsa.h>
+#include <openssl/ssl.h>
+#include <openssl/x509.h>
+#endif
 
 #if !defined(HAVE_EVP_MD_CTX_RESET)
 /**

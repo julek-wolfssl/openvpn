@@ -44,9 +44,15 @@
 #include "ssl_verify_backend.h"
 #include "openssl_compat.h"
 
+#ifdef ENABLE_CRYPTO_WOLFSSL
 #include <wolfssl/openssl/bn.h>
 #include <wolfssl/openssl/err.h>
 #include <wolfssl/openssl/x509v3.h>
+#else
+#include <openssl/bn.h>
+#include <openssl/err.h>
+#include <openssl/x509v3.h>
+#endif
 
 int
 verify_callback(int preverify_ok, X509_STORE_CTX *ctx)

@@ -29,10 +29,18 @@
 #ifndef CRYPTO_OPENSSL_H_
 #define CRYPTO_OPENSSL_H_
 
+#ifdef ENABLE_CRYPTO_WOLFSSL
 #include <wolfssl/openssl/evp.h>
 #include <wolfssl/openssl/hmac.h>
 #include <wolfssl/openssl/md5.h>
 #include <wolfssl/openssl/sha.h>
+#else
+#include <openssl/evp.h>
+#include <openssl/hmac.h>
+#include <openssl/md5.h>
+#include <openssl/sha.h>
+#endif
+
 
 /** Generic cipher key type %context. */
 typedef EVP_CIPHER cipher_kt_t;

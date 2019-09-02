@@ -52,6 +52,7 @@
 
 #include "ssl_verify_openssl.h"
 
+#ifdef ENABLE_CRYPTO_WOLFSSL
 #include <wolfssl/openssl/bn.h>
 #include <wolfssl/openssl/crypto.h>
 #include <wolfssl/openssl/dh.h>
@@ -61,8 +62,22 @@
 #include <wolfssl/openssl/rsa.h>
 #include <wolfssl/openssl/x509.h>
 #include <wolfssl/openssl/ssl.h>
-#ifndef OPENSSL_NO_EC
+#ifdef HAVE_ECC
 #include <wolfssl/openssl/ec.h>
+#endif
+#else
+#include <openssl/bn.h>
+#include <openssl/crypto.h>
+#include <openssl/dh.h>
+#include <openssl/dsa.h>
+#include <openssl/err.h>
+#include <openssl/pkcs12.h>
+#include <openssl/rsa.h>
+#include <openssl/x509.h>
+#include <openssl/ssl.h>
+#ifndef OPENSSL_NO_EC
+#include <openssl/ec.h>
+#endif
 #endif
 
 /*
